@@ -150,6 +150,12 @@ private struct MainContentView: View {
                 .help("Refresh now")
             }
             Button {
+                // Dismiss the MenuBarExtra panel first so it doesn't
+                // sit on top of the Settings window. The panel is the
+                // only NSPanel this app owns.
+                for case let panel as NSPanel in NSApp.windows {
+                    panel.close()
+                }
                 // Bring the app forward so the Settings window isn't buried
                 // behind whatever was focused when the popover dismissed.
                 NSApp.activate(ignoringOtherApps: true)
