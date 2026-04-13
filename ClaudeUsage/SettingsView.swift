@@ -4,13 +4,15 @@
 //
 //  Contents of the app's Settings (Preferences) window, presented by the
 //  cog button in the popover header via `openSettings`. Uses a TabView
-//  with two tabs: "General" for user-facing preferences, "Developer" for
-//  the fetch diagnostic counters.
+//  with three tabs: "General" for user-facing preferences, "Notifications"
+//  for usage-threshold alert opt-ins, and "Developer" for the fetch
+//  diagnostic counters.
 //
 
 import Combine
 import ServiceManagement
 import SwiftUI
+import UserNotifications
 
 struct SettingsView: View {
     var body: some View {
@@ -18,6 +20,11 @@ struct SettingsView: View {
             GeneralSettingsView()
                 .tabItem {
                     Label("General", systemImage: "gearshape")
+                }
+
+            NotificationsSettingsView()
+                .tabItem {
+                    Label("Notifications", systemImage: "bell.badge")
                 }
 
             DeveloperSettingsView()
@@ -153,6 +160,124 @@ private struct GeneralSettingsView: View {
             launchAtLoginMessage = "macOS can’t find the app bundle. Move Menu Bar Usage for Claude into /Applications and try again."
         default:
             break
+        }
+    }
+}
+
+// MARK: - Notifications
+
+private struct NotificationsSettingsView: View {
+    @Environment(UsageStore.self) private var usage
+
+    @AppStorage(SettingsKeys.notifyAt50Percent) private var notifyAt50 = false
+    @AppStorage(SettingsKeys.notifyAt75Percent) private var notifyAt75 = false
+    @AppStorage(SettingsKeys.notifyAt90Percent) private var notifyAt90 = false
+    @AppStorage(SettingsKeys.notifyOnReset) private var notifyOnReset = false
+
+    var body: some View {
+        Form {
+            if usage.notificationManager.authorizationStatus != .authorized {
+                Section {
+                    authorizationBanner
+                }
+            }
+
+            Section {
+                Toggle(isOn: toggleWithAuthRequest($notifyAt50)) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("50% usage")
+                        Text("Notify when current session usage reaches 50%.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Toggle(isOn: toggleWithAuthRequest($notifyAt75)) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("75% usage")
+                        Text("Notify when current session usage reaches 75%.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Toggle(isOn: toggleWithAuthRequest($notifyAt90)) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("90% usage")
+                        Text("Notify when current session usage reaches 90%.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Toggle(isOn: toggleWithAuthRequest($notifyOnReset)) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Usage reset")
+                        Text("Notify when your session usage resets after reaching 100%.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } header: {
+                Text("Session Usage Alerts")
+            } footer: {
+                Text("Each threshold fires at most once per session window. The reset notification requires that usage reached 100% before the window expired.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .task {
+            await usage.notificationManager.refreshAuthorizationStatus()
+        }
+    }
+
+    /// When the user enables a toggle and notification authorization
+    /// hasn't been determined yet, automatically request it so the
+    /// system prompt appears without a separate button press.
+    private func toggleWithAuthRequest(_ binding: Binding<Bool>) -> Binding<Bool> {
+        Binding(
+            get: { binding.wrappedValue },
+            set: { newValue in
+                binding.wrappedValue = newValue
+                if newValue && usage.notificationManager.authorizationStatus == .notDetermined {
+                    Task { await usage.notificationManager.requestAuthorization() }
+                }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var authorizationBanner: some View {
+        let status = usage.notificationManager.authorizationStatus
+        VStack(alignment: .leading, spacing: 8) {
+            Label {
+                if status == .notDetermined {
+                    Text("Notifications have not been enabled yet.")
+                } else {
+                    Text("Notifications are disabled for this app.")
+                }
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+            }
+
+            Text(status == .notDetermined
+                 ? "Enable notifications to receive usage alerts. You can also just flip a toggle below — macOS will ask for permission automatically."
+                 : "Notifications were previously denied. You can re-enable them in System Settings.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if status == .notDetermined {
+                Button("Enable Notifications") {
+                    Task { await usage.notificationManager.requestAuthorization() }
+                }
+            } else if status == .denied {
+                Button("Open Notification Settings…") {
+                    usage.notificationManager.openNotificationSettings()
+                }
+            }
         }
     }
 }

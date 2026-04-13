@@ -267,6 +267,7 @@ final class UsageStore {
     /// indicator. Still mutated internally by `refresh()`.
     private(set) var rateLimitedUntil: Date?
 
+    let notificationManager = NotificationManager()
     private let client = UsageAPIClient()
     private var pollTask: Task<Void, Never>?
 
@@ -315,6 +316,7 @@ final class UsageStore {
     /// call while polling is already active is a no-op.
     func startPolling() {
         guard pollTask == nil else { return }
+        Task { await notificationManager.refreshAuthorizationStatus() }
         pollTask = makePollTask(fetchImmediately: true)
     }
 
@@ -446,6 +448,7 @@ final class UsageStore {
             state = .loaded(snapshot)
             lastUpdated = snapshot.fetchedAt
             rateLimitedUntil = nil
+            notificationManager.evaluateThresholds(snapshot: snapshot)
         } catch UsageAPIError.rateLimited(let retryAfter) {
             // Respect the server's hint if it's sensible, but never drop
             // below our own minimum — a `Retry-After: 0` header must not

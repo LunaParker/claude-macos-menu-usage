@@ -30,6 +30,12 @@ enum SettingsKeys {
     /// Polling interval in seconds. Validated by `UsageStore` against the
     /// allowed range (120–300) — anything outside falls back to the default.
     static let pollIntervalSeconds = "pollIntervalSeconds"
+
+    // Notification preferences
+    static let notifyAt50Percent = "notifyAt50Percent"
+    static let notifyAt75Percent = "notifyAt75Percent"
+    static let notifyAt90Percent = "notifyAt90Percent"
+    static let notifyOnReset = "notifyOnReset"
 }
 
 /// The stable window id for the welcome/onboarding window opened at launch.
