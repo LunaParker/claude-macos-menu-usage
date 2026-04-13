@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	    Menu Bar Usage for Claude runs with the hardened runtime enabled
+	    (ENABLE_HARDENED_RUNTIME = YES) and the App Sandbox disabled
+	    (ENABLE_APP_SANDBOX = NO). Sandboxing has to be off because the app
+	    reads the `Claude Code-credentials` Keychain item written by a
+	    different process (the claude CLI); sandboxed apps can only see
+	    Keychain items inside their own access group.
+
+	    Every hardened-runtime protection is left at its secure default:
+	    no JIT, no unsigned executable memory, no DYLD env vars, no
+	    debugging, no disabled library validation, no Apple Events, no
+	    camera/mic/location, etc. The app does not need any runtime
+	    exceptions — it just makes HTTPS calls and reads one Keychain
+	    item — so this file's only job is to explicitly declare that the
+	    sandbox is off. Everything else inherits the hardened runtime
+	    defaults.
+	-->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+</dict>
+</plist>
