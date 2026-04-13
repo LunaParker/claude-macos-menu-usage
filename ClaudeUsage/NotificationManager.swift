@@ -95,6 +95,19 @@ final class NotificationManager {
         checkThreshold(90, fraction: fraction, key: SettingsKeys.notifyAt90Percent)
     }
 
+    // MARK: - Test
+
+    /// Sends a test notification so the user can verify delivery works.
+    /// Refreshes authorization status first so the result is accurate.
+    func sendTestNotification() async {
+        await refreshAuthorizationStatus()
+        deliverNotification(
+            title: "Test Notification",
+            body: "Notifications from Menu Bar Usage for Claude are working.",
+            identifier: "usage-test"
+        )
+    }
+
     // MARK: - Private helpers
 
     private func checkThreshold(_ percent: Int, fraction: Double, key: String) {

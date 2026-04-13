@@ -355,7 +355,23 @@ private struct DeveloperSettingsView: View {
                     .disabled(usage.isRefreshing)
                 }
             } footer: {
-                Text("Resetting the counters also resets the “Tracking since” timer so you can benchmark the fetch rate from a fresh baseline. Force Refresh bypasses the debounce but not the rate-limit cooldown.")
+                Text("Resetting the counters also resets the \u{201c}Tracking since\u{201d} timer so you can benchmark the fetch rate from a fresh baseline. Force Refresh bypasses the debounce but not the rate-limit cooldown.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Button("Send Test Notification") {
+                    Task { await usage.notificationManager.sendTestNotification() }
+                }
+                .disabled(
+                    usage.notificationManager.authorizationStatus != .authorized
+                    && usage.notificationManager.authorizationStatus != .provisional
+                )
+            } header: {
+                Text("Notifications")
+            } footer: {
+                Text("Delivers a test notification to verify that macOS notifications are working for this app. The button is disabled when notification permission hasn't been granted.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
