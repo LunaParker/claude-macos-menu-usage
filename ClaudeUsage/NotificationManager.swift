@@ -66,6 +66,9 @@ final class NotificationManager {
 
     // MARK: - Evaluation
 
+    /// The percentage thresholds that can trigger notifications.
+    private static let thresholdPercents = [50, 75, 90]
+
     /// Called after each successful usage fetch. Compares the session bar
     /// against the user's enabled thresholds and delivers notifications
     /// for any newly crossed thresholds.
@@ -73,15 +76,19 @@ final class NotificationManager {
         let fraction = snapshot.session.fraction
         let resetsAt = snapshot.session.resetsAt
 
-        // Detect session window rotation.
-        if resetsAt != trackedResetsAt {
+        // Detect session window rotation (or first evaluation after launch).
+        if !isSameResetTime(resetsAt, trackedResetsAt) {
             // Only fire the reset notification when we've actually been
             // tracking a previous window (not on first launch) AND that
             // window reached capacity.
             if trackedResetsAt != nil && sawCapacity {
                 deliverResetNotificationIfEnabled()
             }
-            firedThresholds.removeAll()
+            // Pre-seed with thresholds already surpassed so we only fire
+            // the highest applicable one — avoids a burst of stale alerts
+            // on app launch or session window rotation.
+            let exceeded = Self.thresholdPercents.filter { fraction >= Double($0) / 100.0 }
+            firedThresholds = Set(exceeded.dropLast())
             sawCapacity = false
             trackedResetsAt = resetsAt
         }
@@ -115,12 +122,31 @@ final class NotificationManager {
         guard fraction >= target,
               !firedThresholds.contains(percent),
               UserDefaults.standard.bool(forKey: key) else { return }
+        // Only consume the threshold when delivery is possible. If
+        // authorization hasn't been determined yet (startup race with
+        // refreshAuthorizationStatus), the threshold stays unfired so
+        // it can be re-checked on the next poll tick.
+        guard authorizationStatus == .authorized || authorizationStatus == .provisional else { return }
         firedThresholds.insert(percent)
         deliverNotification(
             title: "Claude Usage Alert",
             body: "Your current session usage has reached \(percent)%.",
             identifier: "usage-threshold-\(percent)"
         )
+    }
+
+    /// Compares two optional reset-at dates at whole-second granularity.
+    /// The usage endpoint may return fractional seconds that differ
+    /// slightly between responses for the same session window; comparing
+    /// at second precision prevents false session-rotation detections
+    /// that would re-seed `firedThresholds` and re-fire notifications.
+    private func isSameResetTime(_ a: Date?, _ b: Date?) -> Bool {
+        switch (a, b) {
+        case (nil, nil): return true
+        case (nil, _), (_, nil): return false
+        case (let a?, let b?):
+            return Int(a.timeIntervalSince1970) == Int(b.timeIntervalSince1970)
+        }
     }
 
     private func deliverResetNotificationIfEnabled() {
