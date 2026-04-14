@@ -15,12 +15,34 @@ import UserNotifications
 
 @Observable
 @MainActor
-final class NotificationManager {
+final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     /// The current macOS notification authorization status for this app.
     /// Refreshed each time the Notifications settings tab appears and
     /// once at app launch when polling starts.
     private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
+
+    // MARK: - Delegate setup
+
+    /// Registers this instance as the notification center's delegate so
+    /// that `willPresent` is called even when the app is in the foreground.
+    /// Must be called once, early in the app lifecycle (e.g. from
+    /// `startPolling()`).
+    func registerAsDelegate() {
+        UNUserNotificationCenter.current().delegate = self
+    }
+
+    /// Always present banners and play sounds, even when the app is in the
+    /// foreground. Without this, macOS silences notifications whenever the
+    /// popover, Settings, or onboarding window is the key window — which
+    /// is exactly when the user is most likely to trigger a threshold-
+    /// crossing fetch via `refreshNow()`.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .sound, .list]
+    }
 
     // MARK: - Threshold tracking
 

@@ -316,6 +316,7 @@ final class UsageStore {
     /// call while polling is already active is a no-op.
     func startPolling() {
         guard pollTask == nil else { return }
+        notificationManager.registerAsDelegate()
         Task { await notificationManager.refreshAuthorizationStatus() }
         pollTask = makePollTask(fetchImmediately: true)
     }
