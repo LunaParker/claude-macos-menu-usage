@@ -135,17 +135,20 @@ final class NotificationManager {
         )
     }
 
-    /// Compares two optional reset-at dates at whole-second granularity.
-    /// The usage endpoint may return fractional seconds that differ
-    /// slightly between responses for the same session window; comparing
-    /// at second precision prevents false session-rotation detections
-    /// that would re-seed `firedThresholds` and re-fire notifications.
+    /// Compares two optional reset-at dates with a tolerance window.
+    /// The usage endpoint returns fractional seconds that jitter between
+    /// responses for the same session window. The old `Int()` truncation
+    /// approach broke when two timestamps straddled a whole-second
+    /// boundary (e.g. …00.93 vs …01.07), causing false rotation
+    /// detections that cleared `firedThresholds` and re-fired
+    /// notifications. A 2-second tolerance eliminates jitter while
+    /// still correctly detecting real 5-hour window rotations.
     private func isSameResetTime(_ a: Date?, _ b: Date?) -> Bool {
         switch (a, b) {
         case (nil, nil): return true
         case (nil, _), (_, nil): return false
         case (let a?, let b?):
-            return Int(a.timeIntervalSince1970) == Int(b.timeIntervalSince1970)
+            return abs(a.timeIntervalSince1970 - b.timeIntervalSince1970) < 2
         }
     }
 
