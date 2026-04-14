@@ -113,67 +113,97 @@ enum KeychainCredentialStore {
 // MARK: - Credential refresh
 
 /// Manages automatic re-authentication when stored credentials expire.
-/// Opens Terminal.app with a Claude Code session so the OAuth token
-/// refresh (or interactive re-login) can proceed.
-///
-/// The app has hardened runtime enabled with no Apple Events entitlement,
-/// so we can't script Terminal.app directly. Instead we write a temporary
-/// `.command` file and open it via `NSWorkspace`, which LaunchServices
-/// hands off to Terminal as the default handler.
+/// Launches the `claude` CLI as a hidden background process so its
+/// startup sequence can use the stored refresh token to obtain a fresh
+/// access token — no visible Terminal window required.
 enum CredentialRefresher {
-    /// Set when a terminal window has been opened for reauth. Cleared
-    /// when credentials are successfully used again (via
+    /// Set when a background refresh has been kicked off. Cleared when
+    /// credentials are successfully used again (via
     /// `credentialsBecameValid()`), so a *new* expiry cycle triggers
-    /// a fresh terminal window.
+    /// a fresh attempt.
     private(set) static var hasAttemptedReauth = false
 
+    /// The background `claude` process, if one is currently running.
+    private static var refreshProcess: Process?
+
+    /// Kills the background process after this interval if it hasn't
+    /// exited on its own. Generous enough for a network token refresh
+    /// but short enough that a hung process doesn't linger all day.
+    private static let processTimeout: TimeInterval = 30
+
     /// Called by `UsageStore` after a successful API fetch proves the
-    /// credentials are valid. Re-arms the reauth trigger so the next
-    /// expiry opens a new terminal.
+    /// credentials are valid. Re-arms the reauth trigger and terminates
+    /// any lingering background process.
     static func credentialsBecameValid() {
         hasAttemptedReauth = false
+        terminateProcess()
     }
 
-    /// Opens Terminal with a Claude Code session to refresh expired
-    /// credentials. Returns `true` if a terminal was opened, `false`
-    /// if a reauth attempt is already in flight.
+    /// Launches `claude` in the background to refresh expired
+    /// credentials. Returns `true` if a process was started, `false`
+    /// if a refresh attempt is already in flight or the process
+    /// couldn't be launched.
+    ///
+    /// The CLI auto-refreshes the OAuth access token during its
+    /// startup sequence using the stored refresh token, then writes
+    /// the updated credentials back to the Keychain. stdin is
+    /// /dev/null so the process exits once startup completes instead
+    /// of blocking on REPL input.
+    ///
+    /// A timeout kills the process if it hasn't exited within
+    /// ``processTimeout`` seconds, and re-arms `hasAttemptedReauth`
+    /// so the next poll cycle can try again.
     @discardableResult
-    static func openTerminalToRefresh() -> Bool {
+    static func refreshInBackground() -> Bool {
         guard !hasAttemptedReauth else { return false }
         hasAttemptedReauth = true
 
-        let script = """
-        #!/bin/bash
-        # Launched by Menu Bar Usage for Claude to refresh expired credentials.
-        echo "Your Claude Code credentials have expired."
-        echo "Starting Claude Code to refresh them…"
-        echo ""
-        if command -v claude &>/dev/null; then
-            claude
-        else
-            echo "'claude' command not found."
-            echo ""
-            echo "Install Claude Code:"
-            echo "  npm install -g @anthropic-ai/claude-code"
-            echo ""
-            echo "Then authenticate:"
-            echo "  claude"
-        fi
-        rm -f "$0"
-        """
-
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("claude-credential-refresh.command")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        // Login shell (-l) inherits the user's PATH so `claude` is
+        // discoverable regardless of how it was installed (npm global,
+        // Homebrew, volta, etc.).
+        process.arguments = ["-l", "-c", "command -v claude &>/dev/null && claude"]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
 
         do {
-            try script.write(to: url, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes(
-                [.posixPermissions: 0o755], ofItemAtPath: url.path
-            )
-            NSWorkspace.shared.open(url)
+            try process.run()
+            refreshProcess = process
+            scheduleTimeout(for: process)
             return true
         } catch {
             return false
+        }
+    }
+
+    // MARK: - Private
+
+    private static func terminateProcess() {
+        if let process = refreshProcess, process.isRunning {
+            process.terminate()
+        }
+        refreshProcess = nil
+    }
+
+    /// Schedules a delayed kill for the given process. If the process
+    /// is still alive after the timeout, it's terminated and
+    /// `hasAttemptedReauth` is cleared so the next poll cycle retries.
+    private static func scheduleTimeout(for process: Process) {
+        DispatchQueue.global(qos: .utility).asyncAfter(
+            deadline: .now() + processTimeout
+        ) {
+            guard process.isRunning else { return }
+            process.terminate()
+            DispatchQueue.main.async {
+                // Only clear if this is still the process we're tracking
+                // (a new attempt may have started in the meantime).
+                if refreshProcess?.processIdentifier == process.processIdentifier {
+                    refreshProcess = nil
+                    hasAttemptedReauth = false
+                }
+            }
         }
     }
 }

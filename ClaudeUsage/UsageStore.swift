@@ -416,13 +416,14 @@ final class UsageStore {
 
         // Bail early if the access token has expired — there's no point
         // hitting the API with a dead token. Instead, launch Claude Code
-        // in a terminal so it can use the refresh token (or prompt for
-        // interactive login) and write fresh credentials to the Keychain.
+        // in the background so it can use the refresh token (or prompt
+        // for interactive login) and write fresh credentials to the
+        // Keychain. The background poll will pick them up automatically.
         if credentials.isExpired {
-            let opened = CredentialRefresher.openTerminalToRefresh()
-            state = .error(opened
-                ? "Your Claude Code token has expired. Opening Terminal to refresh…"
-                : "Your Claude Code token has expired. Check the Terminal window, or run `claude` to re-authenticate.")
+            let started = CredentialRefresher.refreshInBackground()
+            state = .error(started
+                ? "Your Claude Code token has expired. Refreshing in the background…"
+                : "Your Claude Code token has expired. Run `claude` to re-authenticate.")
             return
         }
 
@@ -465,18 +466,18 @@ final class UsageStore {
             // Safety net — the early `isExpired` check above should catch
             // this, but a narrow race between the check and the fetch call
             // could let a just-expired token slip through.
-            let opened = CredentialRefresher.openTerminalToRefresh()
-            state = .error(opened
-                ? "Your Claude Code token has expired. Opening Terminal to refresh…"
-                : "Your Claude Code token has expired. Check the Terminal window, or run `claude` to re-authenticate.")
+            let started = CredentialRefresher.refreshInBackground()
+            state = .error(started
+                ? "Your Claude Code token has expired. Refreshing in the background…"
+                : "Your Claude Code token has expired. Run `claude` to re-authenticate.")
         } catch UsageAPIError.unauthorized {
             // The server rejected the token (401/403). This usually means
             // the token was revoked or is otherwise invalid — running
             // `claude` will re-authenticate.
-            let opened = CredentialRefresher.openTerminalToRefresh()
-            state = .error(opened
-                ? "Claude rejected the stored token. Opening Terminal to re-authenticate…"
-                : "Claude rejected the stored token. Check the Terminal window, or run `claude` to re-authenticate.")
+            let started = CredentialRefresher.refreshInBackground()
+            state = .error(started
+                ? "Claude rejected the stored token. Refreshing in the background…"
+                : "Claude rejected the stored token. Run `claude` to re-authenticate.")
         } catch let error as UsageAPIError {
             state = .error(error.errorDescription ?? "Unknown usage API error.")
         } catch {
