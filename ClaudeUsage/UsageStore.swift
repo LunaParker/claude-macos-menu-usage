@@ -348,6 +348,19 @@ final class UsageStore {
         }
     }
 
+    /// Called when the user explicitly clicks "Try again" or the manual
+    /// refresh button. Resets the credential-refresh deduplication guard
+    /// before refreshing so a new background `claude` process can be
+    /// launched if a prior auto-refresh attempt failed silently — the
+    /// background poll's guard would otherwise leave the user stuck on
+    /// a "Run `claude` to re-authenticate" message with no recourse.
+    func manualRetry() {
+        CredentialRefresher.resetAttemptGuard()
+        Task { @MainActor [weak self] in
+            await self?.refresh()
+        }
+    }
+
     /// Wipes the diagnostic counters and resets the measurement window to
     /// `now`. Used by the Developer tab's Reset button so the user can
     /// benchmark the fetch rate from a fresh baseline.

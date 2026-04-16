@@ -141,7 +141,7 @@ private struct MainContentView: View {
                     .controlSize(.small)
             } else {
                 Button {
-                    Task { await usage.refresh() }
+                    usage.manualRetry()
                 } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 11, weight: .semibold))
@@ -189,7 +189,7 @@ private struct MainContentView: View {
                 RateLimitedView(clearAt: until)
             } else {
                 ErrorView(message: message) {
-                    Task { await usage.refresh() }
+                    usage.manualRetry()
                 }
             }
         }

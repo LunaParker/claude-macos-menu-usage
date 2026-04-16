@@ -139,6 +139,17 @@ enum CredentialRefresher {
         terminateProcess()
     }
 
+    /// Clears the deduplication guard and kills any in-flight background
+    /// process so the very next call to ``refreshInBackground()`` will
+    /// launch a fresh `claude`. Used by the popover's manual retry path
+    /// — when the user explicitly clicks "Try again", they're asking for
+    /// a new attempt regardless of whether one already happened this
+    /// expiry cycle.
+    static func resetAttemptGuard() {
+        terminateProcess()
+        hasAttemptedReauth = false
+    }
+
     /// Launches `claude` in the background to refresh expired
     /// credentials. Returns `true` if a process was started, `false`
     /// if a refresh attempt is already in flight or the process
