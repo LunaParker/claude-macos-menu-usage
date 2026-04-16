@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Xcode — user-specific state (window layout, breakpoints, scheme prefs, etc.)
+xcuserdata/
+*.xcuserstate
+
+# Xcode build products (normally in DerivedData outside the repo, but
+# just in case anything lands locally)
+build/
+DerivedData/
+
+# Swift Package Manager
+.swiftpm/
+.build/
+
+# Claude Code — local/per-user state. Project-shared MCP config lives in
+# the tracked .mcp.json instead.
+.claude/
