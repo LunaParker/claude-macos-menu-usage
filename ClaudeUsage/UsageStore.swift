@@ -271,6 +271,15 @@ final class UsageStore {
     private let client = UsageAPIClient()
     private var pollTask: Task<Void, Never>?
 
+    /// In-memory credential cache. The macOS Keychain prompts the user
+    /// every time a *different* app reads an item whose ACL has been
+    /// reset — and the Claude CLI resets it on every token refresh
+    /// (delete + recreate, see anthropics/claude-code#22144). By
+    /// caching, we only hit the Keychain when the cached token is
+    /// expired or the API rejects it, reducing prompts from every
+    /// poll cycle to at most once per token rotation (~2–3×/day).
+    private var cachedCredentials: ClaudeCredentials?
+
     /// Allowed user-configurable range for the poll interval, in seconds.
     /// Anchored at 5 minutes (the default) and floored at 2 minutes — any
     /// lower and we'd start tripping the endpoint's rate limiter again.
@@ -309,6 +318,18 @@ final class UsageStore {
     /// HTTP-date) from effectively disabling the cooldown and letting the
     /// background poll hammer the endpoint once per minute.
     private let minRateLimitBackoff: TimeInterval = 60
+
+    /// Returns cached credentials when they're still valid, otherwise
+    /// reads fresh credentials from the Keychain (which may trigger a
+    /// macOS authorization prompt).
+    private func loadCredentials() throws -> ClaudeCredentials {
+        if let cached = cachedCredentials, !cached.isExpired {
+            return cached
+        }
+        let fresh = try KeychainCredentialStore.load()
+        cachedCredentials = fresh
+        return fresh
+    }
 
     // MARK: Lifecycle
 
@@ -356,6 +377,7 @@ final class UsageStore {
     /// a "Run `claude` to re-authenticate" message with no recourse.
     func manualRetry() {
         CredentialRefresher.resetAttemptGuard()
+        cachedCredentials = nil
         Task { @MainActor [weak self] in
             await self?.refresh()
         }
@@ -419,11 +441,13 @@ final class UsageStore {
 
         let credentials: ClaudeCredentials
         do {
-            credentials = try KeychainCredentialStore.load()
+            credentials = try loadCredentials()
         } catch KeychainError.itemNotFound {
+            cachedCredentials = nil
             state = .missingCredentials
             return
         } catch {
+            cachedCredentials = nil
             state = .error(error.localizedDescription)
             return
         }
@@ -434,6 +458,7 @@ final class UsageStore {
         // for interactive login) and write fresh credentials to the
         // Keychain. The background poll will pick them up automatically.
         if credentials.isExpired {
+            cachedCredentials = nil
             let started = CredentialRefresher.refreshInBackground()
             state = .error(started
                 ? "Your Claude Code token has expired. Refreshing in the background…"
@@ -480,6 +505,7 @@ final class UsageStore {
             // Safety net — the early `isExpired` check above should catch
             // this, but a narrow race between the check and the fetch call
             // could let a just-expired token slip through.
+            cachedCredentials = nil
             let started = CredentialRefresher.refreshInBackground()
             state = .error(started
                 ? "Your Claude Code token has expired. Refreshing in the background…"
@@ -488,6 +514,7 @@ final class UsageStore {
             // The server rejected the token (401/403). This usually means
             // the token was revoked or is otherwise invalid — running
             // `claude` will re-authenticate.
+            cachedCredentials = nil
             let started = CredentialRefresher.refreshInBackground()
             state = .error(started
                 ? "Claude rejected the stored token. Refreshing in the background…"
