@@ -26,10 +26,25 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     /// Registers this instance as the notification center's delegate so
     /// that `willPresent` is called even when the app is in the foreground.
+    /// Also registers the interactive notification category for the
+    /// auth-lost alert so the "Reauthenticate" action button appears.
     /// Must be called once, early in the app lifecycle (e.g. from
     /// `startPolling()`).
     func registerAsDelegate() {
-        UNUserNotificationCenter.current().delegate = self
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+
+        let reauthAction = UNNotificationAction(
+            identifier: Self.reauthActionIdentifier,
+            title: "Reauthenticate",
+            options: []
+        )
+        let authLostCategory = UNNotificationCategory(
+            identifier: Self.authLostCategoryIdentifier,
+            actions: [reauthAction],
+            intentIdentifiers: []
+        )
+        center.setNotificationCategories([authLostCategory])
     }
 
     /// Always present banners and play sounds, even when the app is in the
@@ -42,6 +57,22 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
         [.banner, .sound, .list]
+    }
+
+    /// Handles notification interactions. When the user taps the auth-lost
+    /// notification (or its "Reauthenticate" action button), launches a
+    /// hidden `claude` process to refresh the stored credentials.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        let category = response.notification.request.content.categoryIdentifier
+        let action = response.actionIdentifier
+        guard category == Self.authLostCategoryIdentifier,
+              action == UNNotificationDefaultActionIdentifier
+                || action == Self.reauthActionIdentifier else { return }
+        CredentialRefresher.resetAttemptGuard()
+        CredentialRefresher.refreshInBackground()
     }
 
     // MARK: - Threshold tracking
@@ -191,5 +222,42 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         content.sound = .default
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
+    }
+
+    // MARK: - Authentication-lost notification
+
+    private static let authLostCategoryIdentifier = "auth-lost"
+    private static let reauthActionIdentifier = "reauth-action"
+
+    /// Guards one-shot delivery: set after firing, cleared only when
+    /// authentication is restored (successful API response).
+    private var hasFiredAuthLostNotification = false
+
+    /// Delivers a notification informing the user that authentication
+    /// has been lost. Only fires once per auth-loss event — subsequent
+    /// calls are no-ops until ``authenticationRestored()`` resets the
+    /// flag.
+    func notifyAuthenticationLost() {
+        guard !hasFiredAuthLostNotification else { return }
+        guard authorizationStatus == .authorized || authorizationStatus == .provisional else { return }
+        hasFiredAuthLostNotification = true
+        let content = UNMutableNotificationContent()
+        content.title = "Authentication Lost"
+        content.body = "Menu Bar Usage for Claude can no longer access your Claude credentials. Tap to reauthenticate."
+        content.sound = .default
+        content.categoryIdentifier = Self.authLostCategoryIdentifier
+        let request = UNNotificationRequest(
+            identifier: "auth-lost-notification",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    /// Resets the one-shot guard so the auth-lost notification can fire
+    /// again the next time authentication is lost. Called by `UsageStore`
+    /// after a successful API response confirms credentials are working.
+    func authenticationRestored() {
+        hasFiredAuthLostNotification = false
     }
 }

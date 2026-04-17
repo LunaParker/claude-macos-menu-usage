@@ -445,6 +445,7 @@ final class UsageStore {
         } catch KeychainError.itemNotFound {
             cachedCredentials = nil
             state = .missingCredentials
+            notificationManager.notifyAuthenticationLost()
             return
         } catch {
             cachedCredentials = nil
@@ -459,6 +460,7 @@ final class UsageStore {
         // Keychain. The background poll will pick them up automatically.
         if credentials.isExpired {
             cachedCredentials = nil
+            notificationManager.notifyAuthenticationLost()
             let started = CredentialRefresher.refreshInBackground()
             state = .error(started
                 ? "Your Claude Code token has expired. Refreshing in the background…"
@@ -484,6 +486,7 @@ final class UsageStore {
         do {
             let response = try await client.fetch(using: credentials)
             CredentialRefresher.credentialsBecameValid()
+            notificationManager.authenticationRestored()
             let snapshot = Self.buildSnapshot(from: response, credentials: credentials)
             state = .loaded(snapshot)
             lastUpdated = snapshot.fetchedAt
@@ -506,6 +509,7 @@ final class UsageStore {
             // this, but a narrow race between the check and the fetch call
             // could let a just-expired token slip through.
             cachedCredentials = nil
+            notificationManager.notifyAuthenticationLost()
             let started = CredentialRefresher.refreshInBackground()
             state = .error(started
                 ? "Your Claude Code token has expired. Refreshing in the background…"
@@ -515,6 +519,7 @@ final class UsageStore {
             // the token was revoked or is otherwise invalid — running
             // `claude` will re-authenticate.
             cachedCredentials = nil
+            notificationManager.notifyAuthenticationLost()
             let started = CredentialRefresher.refreshInBackground()
             state = .error(started
                 ? "Claude rejected the stored token. Refreshing in the background…"
