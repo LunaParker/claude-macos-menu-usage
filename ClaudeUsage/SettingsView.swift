@@ -45,7 +45,12 @@ private struct GeneralSettingsView: View {
     @AppStorage(SettingsKeys.pollIntervalSeconds)
     private var pollIntervalSeconds: Int = defaultPollIntervalSeconds
 
+    @AppStorage(SettingsKeys.preferredBrowserBundleID)
+    private var preferredBrowserBundleID: String = ""
+
     @Environment(UsageStore.self) private var usage
+
+    @State private var browsers: [BrowserHelper.BrowserInfo] = []
 
     /// Mirrors `SMAppService.mainApp.status == .enabled`. Initialised from
     /// the live status on first appearance rather than stored locally —
@@ -111,9 +116,30 @@ private struct GeneralSettingsView: View {
             } header: {
                 Text("Polling")
             }
+
+            Section {
+                Picker(selection: $preferredBrowserBundleID) {
+                    Text("System Default").tag("")
+                    ForEach(browsers) { browser in
+                        Text(browser.name).tag(browser.id)
+                    }
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Open links in")
+                        Text("Which browser to use when opening Claude web links from the popover and notifications.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .pickerStyle(.menu)
+            } header: {
+                Text("Browser")
+            }
         }
         .formStyle(.grouped)
         .onAppear {
+            browsers = BrowserHelper.installedBrowsers()
             refreshLaunchAtLoginStatus()
         }
         .onChange(of: pollIntervalSeconds) { _, _ in

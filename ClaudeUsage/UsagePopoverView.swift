@@ -320,7 +320,6 @@ struct QuotaBarView: View {
 /// background) so it's obvious this is paid usage, not free quota.
 private struct ExtraUsageCard: View {
     let summary: UsageSnapshot.ExtraUsageSummary
-    @Environment(\.openURL) private var openURL
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -367,7 +366,7 @@ private struct ExtraUsageCard: View {
                 Spacer(minLength: 8)
                 Button {
                     if let url = URL(string: "https://claude.ai/settings/usage") {
-                        openURL(url)
+                        BrowserHelper.open(url)
                     }
                 } label: {
                     HStack(spacing: 3) {
@@ -406,7 +405,6 @@ private struct ExtraUsageCard: View {
 // MARK: - Error states
 
 private struct MissingCredentialsView: View {
-    @Environment(\.openURL) private var openURL
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -453,7 +451,7 @@ private struct MissingCredentialsView: View {
 
             Button {
                 if let url = URL(string: "https://docs.claude.com/en/docs/claude-code/overview") {
-                    openURL(url)
+                    BrowserHelper.open(url)
                 }
             } label: {
                 Label("Claude Code setup docs", systemImage: "arrow.up.forward.app")

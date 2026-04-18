@@ -91,7 +91,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
         case (Self.thresholdCategoryIdentifier, Self.manageUsageActionIdentifier):
             if let url = URL(string: "https://claude.ai/settings/usage") {
-                await MainActor.run { NSWorkspace.shared.open(url) }
+                await MainActor.run { BrowserHelper.open(url) }
             }
 
         default:
