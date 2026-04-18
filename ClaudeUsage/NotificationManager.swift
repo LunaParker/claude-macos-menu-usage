@@ -44,7 +44,21 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
             actions: [reauthAction],
             intentIdentifiers: []
         )
-        center.setNotificationCategories([authLostCategory])
+
+        let manageUsageAction = UNNotificationAction(
+            identifier: Self.manageUsageActionIdentifier,
+            title: "Manage Usage",
+            options: [.foreground]
+        )
+        let thresholdCategory = UNNotificationCategory(
+            identifier: Self.thresholdCategoryIdentifier,
+            actions: [manageUsageAction],
+            intentIdentifiers: []
+        )
+
+        // setNotificationCategories replaces all categories, so both
+        // must be registered in a single call.
+        center.setNotificationCategories([authLostCategory, thresholdCategory])
     }
 
     /// Always present banners and play sounds, even when the app is in the
@@ -59,20 +73,30 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         [.banner, .sound, .list]
     }
 
-    /// Handles notification interactions. When the user taps the auth-lost
-    /// notification (or its "Reauthenticate" action button), launches a
-    /// hidden `claude` process to refresh the stored credentials.
+    /// Handles notification interactions:
+    /// - Auth-lost: launches a hidden `claude` process to refresh credentials.
+    /// - Usage threshold: opens the Claude usage settings page in the browser.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
         let category = response.notification.request.content.categoryIdentifier
         let action = response.actionIdentifier
-        guard category == Self.authLostCategoryIdentifier,
-              action == UNNotificationDefaultActionIdentifier
-                || action == Self.reauthActionIdentifier else { return }
-        CredentialRefresher.resetAttemptGuard()
-        CredentialRefresher.refreshInBackground()
+
+        switch (category, action) {
+        case (Self.authLostCategoryIdentifier, UNNotificationDefaultActionIdentifier),
+             (Self.authLostCategoryIdentifier, Self.reauthActionIdentifier):
+            CredentialRefresher.resetAttemptGuard()
+            CredentialRefresher.refreshInBackground()
+
+        case (Self.thresholdCategoryIdentifier, Self.manageUsageActionIdentifier):
+            if let url = URL(string: "https://claude.ai/settings/usage") {
+                await MainActor.run { NSWorkspace.shared.open(url) }
+            }
+
+        default:
+            break
+        }
     }
 
     // MARK: - Threshold tracking
@@ -164,7 +188,8 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         deliverNotification(
             title: "Test Notification",
             body: "Notifications from Menu Bar Usage for Claude are working.",
-            identifier: "usage-test"
+            identifier: "usage-test",
+            categoryIdentifier: Self.thresholdCategoryIdentifier
         )
     }
 
@@ -184,7 +209,8 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         deliverNotification(
             title: "Claude Usage Alert",
             body: "Your current session usage has reached \(percent)%.",
-            identifier: "usage-threshold-\(percent)"
+            identifier: "usage-threshold-\(percent)",
+            categoryIdentifier: Self.thresholdCategoryIdentifier
         )
     }
 
@@ -214,12 +240,20 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         )
     }
 
-    private func deliverNotification(title: String, body: String, identifier: String) {
+    private func deliverNotification(
+        title: String,
+        body: String,
+        identifier: String,
+        categoryIdentifier: String? = nil
+    ) {
         guard authorizationStatus == .authorized || authorizationStatus == .provisional else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
+        if let categoryIdentifier {
+            content.categoryIdentifier = categoryIdentifier
+        }
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
     }
@@ -228,6 +262,8 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     private static let authLostCategoryIdentifier = "auth-lost"
     private static let reauthActionIdentifier = "reauth-action"
+    private static let thresholdCategoryIdentifier = "usage-threshold"
+    private static let manageUsageActionIdentifier = "manage-usage-action"
 
     /// Guards one-shot delivery: set after firing, cleared only when
     /// authentication is restored (successful API response).
