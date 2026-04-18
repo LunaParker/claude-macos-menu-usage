@@ -230,6 +230,25 @@ private struct MainContentView: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
+            Button {
+                if let url = URL(string: "https://claude.ai/settings/usage") {
+                    // Dismiss the popover before opening the browser so
+                    // it doesn't sit on top of the window that appears.
+                    for case let panel as NSPanel in NSApp.windows {
+                        panel.close()
+                    }
+                    BrowserHelper.open(url)
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Text("Manage")
+                    Image(systemName: "arrow.up.forward")
+                        .font(.system(size: 8, weight: .semibold))
+                }
+            }
+            .buttonStyle(.borderless)
+            .font(.caption)
+            .padding(.trailing, 4)
             Button("Quit") {
                 NSApp.terminate(nil)
             }
@@ -358,26 +377,10 @@ private struct ExtraUsageCard: View {
             }
             .frame(height: 8)
 
-            HStack(alignment: .firstTextBaseline) {
-                Text(balanceText)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                Button {
-                    if let url = URL(string: "https://claude.ai/settings/usage") {
-                        BrowserHelper.open(url)
-                    }
-                } label: {
-                    HStack(spacing: 3) {
-                        Text("Manage")
-                        Image(systemName: "arrow.up.forward")
-                            .font(.system(size: 9, weight: .semibold))
-                    }
-                    .font(.caption2)
-                }
-                .buttonStyle(.link)
-            }
+            Text(balanceText)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
         }
         .padding(10)
         .background(.quinary, in: RoundedRectangle(cornerRadius: 8))
