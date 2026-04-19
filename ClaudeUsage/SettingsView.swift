@@ -312,6 +312,7 @@ private struct NotificationsSettingsView: View {
 
 private struct DeveloperSettingsView: View {
     @Environment(UsageStore.self) private var usage
+    @Environment(\.openWindow) private var openWindow
 
     /// Drives relative-date labels to re-render once a second while the
     /// tab is visible so "Updated 14 sec ago" stays accurate without the
@@ -398,6 +399,19 @@ private struct DeveloperSettingsView: View {
                 Text("Notifications")
             } footer: {
                 Text("Delivers a test notification to verify that macOS notifications are working for this app. The button is disabled when notification permission hasn't been granted.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Button("Open Diagnostic Log") {
+                    NSApp.activate(ignoringOtherApps: true)
+                    openWindow(id: WindowIDs.diagnosticLog)
+                }
+            } header: {
+                Text("Diagnostic Log")
+            } footer: {
+                Text("Opens a window showing timestamped log entries for Keychain reads, API requests, and background credential refresh events.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -501,6 +515,90 @@ private struct DeveloperSettingsView: View {
             Label("Clear", systemImage: "checkmark.circle")
                 .labelStyle(.titleAndIcon)
                 .foregroundStyle(.green)
+        }
+    }
+}
+
+// MARK: - Diagnostic Log Window
+
+struct DiagnosticLogView: View {
+    @Environment(DiagnosticLog.self) private var log
+    @State private var filterCategory: DiagnosticLog.Entry.Category?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            toolbar
+            Divider()
+            logList
+        }
+        .frame(minWidth: 600, minHeight: 400)
+    }
+
+    private var toolbar: some View {
+        HStack(spacing: 12) {
+            Picker("Category", selection: $filterCategory) {
+                Text("All").tag(nil as DiagnosticLog.Entry.Category?)
+                ForEach(DiagnosticLog.Entry.Category.allCases, id: \.self) { cat in
+                    Text(cat.rawValue).tag(cat as DiagnosticLog.Entry.Category?)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 300)
+
+            Spacer()
+
+            Text("\(filteredEntries.count) entries")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+
+            Button("Clear") { log.clear() }
+                .buttonStyle(.borderless)
+                .font(.caption)
+        }
+        .padding(10)
+    }
+
+    private var logList: some View {
+        ScrollViewReader { proxy in
+            List(filteredEntries) { entry in
+                HStack(alignment: .top, spacing: 8) {
+                    Text(entry.timestamp, format: .dateTime.hour().minute().second())
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 70, alignment: .leading)
+
+                    Text(entry.category.rawValue)
+                        .font(.caption.bold())
+                        .foregroundStyle(categoryColor(entry.category))
+                        .frame(width: 60, alignment: .leading)
+
+                    Text(entry.message)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+                .id(entry.id)
+            }
+            .onChange(of: log.entries.count) { _, _ in
+                if let last = filteredEntries.last {
+                    withAnimation {
+                        proxy.scrollTo(last.id, anchor: .bottom)
+                    }
+                }
+            }
+        }
+    }
+
+    private var filteredEntries: [DiagnosticLog.Entry] {
+        guard let cat = filterCategory else { return log.entries }
+        return log.entries.filter { $0.category == cat }
+    }
+
+    private func categoryColor(_ cat: DiagnosticLog.Entry.Category) -> Color {
+        switch cat {
+        case .keychain: .orange
+        case .api: .blue
+        case .refresh: .purple
         }
     }
 }

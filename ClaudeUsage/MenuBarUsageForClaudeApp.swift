@@ -45,6 +45,7 @@ enum SettingsKeys {
 /// The stable window id for the welcome/onboarding window opened at launch.
 enum WindowIDs {
     static let onboarding = "onboarding"
+    static let diagnosticLog = "diagnosticLog"
 }
 
 /// Opens web URLs in the user's preferred browser (or the system default).
@@ -223,6 +224,12 @@ struct MenuBarUsageForClaudeApp: App {
             SettingsView()
                 .environment(usage)
         }
+
+        Window("Diagnostic Log", id: WindowIDs.diagnosticLog) {
+            DiagnosticLogView()
+                .environment(DiagnosticLog.shared)
+        }
+        .windowResizability(.contentMinSize)
     }
 }
 

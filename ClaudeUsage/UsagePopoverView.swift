@@ -188,7 +188,10 @@ private struct MainContentView: View {
             if let until = usage.rateLimitedUntil, until > Date() {
                 RateLimitedView(clearAt: until)
             } else {
-                ErrorView(message: message) {
+                ErrorView(
+                    message: message,
+                    isRefreshInProgress: usage.isRefreshingCredentials
+                ) {
                     usage.manualRetry()
                 }
             }
@@ -467,6 +470,7 @@ private struct MissingCredentialsView: View {
 
 private struct ErrorView: View {
     let message: String
+    var isRefreshInProgress: Bool = false
     let retry: () -> Void
 
     var body: some View {
@@ -481,9 +485,19 @@ private struct ErrorView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Button("Try again", action: retry)
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+            if isRefreshInProgress {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Refreshing\u{2026}")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Button("Try again", action: retry)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
         }
     }
 }

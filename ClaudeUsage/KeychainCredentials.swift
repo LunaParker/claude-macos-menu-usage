@@ -88,23 +88,35 @@ enum KeychainCredentialStore {
 
         switch status {
         case errSecSuccess:
-            break
+            DiagnosticLog.shared.post(.keychain, "Keychain read succeeded")
         case errSecItemNotFound:
+            DiagnosticLog.shared.post(.keychain, "Keychain item not found")
             throw KeychainError.itemNotFound
         case errSecAuthFailed, errSecUserCanceled, errSecInteractionNotAllowed:
+            DiagnosticLog.shared.post(.keychain, "Keychain access denied (OSStatus \(status))")
             throw KeychainError.accessDenied(status)
         default:
+            DiagnosticLog.shared.post(.keychain, "Keychain unexpected status: \(status)")
             throw KeychainError.unexpectedStatus(status)
         }
 
         guard let data = item as? Data else {
+            DiagnosticLog.shared.post(.keychain, "Keychain data is not Data")
             throw KeychainError.malformedPayload(nil)
         }
 
         do {
             let envelope = try JSONDecoder().decode(CredentialsEnvelope.self, from: data)
-            return envelope.claudeAiOauth
+            let creds = envelope.claudeAiOauth
+            let formatter = RelativeDateTimeFormatter()
+            formatter.unitsStyle = .full
+            let relative = creds.isExpired
+                ? "expired \(formatter.localizedString(for: creds.expirationDate, relativeTo: Date()))"
+                : "expires \(formatter.localizedString(for: creds.expirationDate, relativeTo: Date()))"
+            DiagnosticLog.shared.post(.keychain, "Token \(relative)")
+            return creds
         } catch {
+            DiagnosticLog.shared.post(.keychain, "Failed to decode Keychain payload")
             throw KeychainError.malformedPayload(error)
         }
     }
@@ -126,6 +138,11 @@ enum CredentialRefresher {
     /// The background `claude` process, if one is currently running.
     private static var refreshProcess: Process?
 
+    /// Called on the main thread when the background refresh process
+    /// exits (normally or via timeout). Set by `UsageStore` at startup
+    /// so the store can clear its observable `isRefreshingCredentials`.
+    static var onRefreshEnded: (() -> Void)?
+
     /// Kills the background process after this interval if it hasn't
     /// exited on its own. Generous enough for a network token refresh
     /// but short enough that a hung process doesn't linger all day.
@@ -135,8 +152,10 @@ enum CredentialRefresher {
     /// credentials are valid. Re-arms the reauth trigger and terminates
     /// any lingering background process.
     static func credentialsBecameValid() {
+        DiagnosticLog.shared.post(.refresh, "Credentials validated, clearing refresh state")
         hasAttemptedReauth = false
         terminateProcess()
+        onRefreshEnded?()
     }
 
     /// Clears the deduplication guard and kills any in-flight background
@@ -166,7 +185,10 @@ enum CredentialRefresher {
     /// so the next poll cycle can try again.
     @discardableResult
     static func refreshInBackground() -> Bool {
-        guard !hasAttemptedReauth else { return false }
+        guard !hasAttemptedReauth else {
+            DiagnosticLog.shared.post(.refresh, "Skipped: refresh already attempted")
+            return false
+        }
         hasAttemptedReauth = true
 
         let process = Process()
@@ -179,12 +201,30 @@ enum CredentialRefresher {
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
 
+        // When the process exits (normally or killed), clear the
+        // dedup guard so the next poll cycle can retry with fresh
+        // credentials. Without this, a fast-exiting `claude` would
+        // leave hasAttemptedReauth stuck at `true` indefinitely.
+        process.terminationHandler = { terminatedProcess in
+            let code = terminatedProcess.terminationStatus
+            DiagnosticLog.shared.post(.refresh, "Process exited with code \(code)")
+            DispatchQueue.main.async {
+                if refreshProcess?.processIdentifier == terminatedProcess.processIdentifier {
+                    refreshProcess = nil
+                    hasAttemptedReauth = false
+                    onRefreshEnded?()
+                }
+            }
+        }
+
         do {
             try process.run()
             refreshProcess = process
+            DiagnosticLog.shared.post(.refresh, "Background claude process launched (PID \(process.processIdentifier))")
             scheduleTimeout(for: process)
             return true
         } catch {
+            DiagnosticLog.shared.post(.refresh, "Failed to launch claude process: \(error)")
             return false
         }
     }
@@ -206,6 +246,7 @@ enum CredentialRefresher {
             deadline: .now() + processTimeout
         ) {
             guard process.isRunning else { return }
+            DiagnosticLog.shared.post(.refresh, "Process timed out after \(processTimeout)s, terminating")
             process.terminate()
             DispatchQueue.main.async {
                 // Only clear if this is still the process we're tracking

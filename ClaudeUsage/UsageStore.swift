@@ -246,6 +246,11 @@ final class UsageStore {
     private(set) var isRefreshing: Bool = false
     private(set) var lastUpdated: Date?
 
+    /// True while a background `claude` process is actively running to
+    /// refresh credentials. Used by the popover to swap the "Try again"
+    /// button for a progress indicator.
+    private(set) var isRefreshingCredentials: Bool = false
+
     // MARK: Diagnostic counters (surfaced on the Developer tab)
 
     /// When the diagnostic measurement window started. Equal to app launch
@@ -324,8 +329,10 @@ final class UsageStore {
     /// macOS authorization prompt).
     private func loadCredentials() throws -> ClaudeCredentials {
         if let cached = cachedCredentials, !cached.isExpired {
+            DiagnosticLog.shared.log(.keychain, "Using cached credentials")
             return cached
         }
+        DiagnosticLog.shared.log(.keychain, "Cache miss, loading from Keychain")
         let fresh = try KeychainCredentialStore.load()
         cachedCredentials = fresh
         return fresh
@@ -339,6 +346,11 @@ final class UsageStore {
         guard pollTask == nil else { return }
         notificationManager.registerAsDelegate()
         Task { await notificationManager.refreshAuthorizationStatus() }
+        CredentialRefresher.onRefreshEnded = { [weak self] in
+            MainActor.assumeIsolated {
+                self?.isRefreshingCredentials = false
+            }
+        }
         pollTask = makePollTask(fetchImmediately: true)
     }
 
@@ -460,8 +472,10 @@ final class UsageStore {
         // Keychain. The background poll will pick them up automatically.
         if credentials.isExpired {
             cachedCredentials = nil
+            DiagnosticLog.shared.log(.refresh, "Token expired, attempting background refresh")
             notificationManager.notifyAuthenticationLost()
             let started = CredentialRefresher.refreshInBackground()
+            if started { isRefreshingCredentials = true }
             state = .error(started
                 ? "Your Claude Code token has expired. Refreshing in the background…"
                 : "Your Claude Code token has expired. Run `claude` to re-authenticate.")
@@ -482,9 +496,11 @@ final class UsageStore {
         // the app isn't spamming the endpoint.
         networkRequestCount += 1
         lastNetworkAttemptAt = Date()
+        DiagnosticLog.shared.log(.api, "Request #\(networkRequestCount) started")
 
         do {
             let response = try await client.fetch(using: credentials)
+            DiagnosticLog.shared.log(.api, "HTTP 200 — usage data received")
             CredentialRefresher.credentialsBecameValid()
             notificationManager.authenticationRestored()
             let snapshot = Self.buildSnapshot(from: response, credentials: credentials)
@@ -498,6 +514,7 @@ final class UsageStore {
             // translate to "no cooldown".
             let suggested = retryAfter ?? defaultRateLimitBackoff
             let backoff = max(suggested, minRateLimitBackoff)
+            DiagnosticLog.shared.log(.api, "HTTP 429 — rate limited, backoff \(Int(backoff))s")
             rateLimitedUntil = Date().addingTimeInterval(backoff)
             // If we already had a good snapshot, keep it visible rather than
             // replacing the bars with an error screen — the data is stale
@@ -508,9 +525,11 @@ final class UsageStore {
             // Safety net — the early `isExpired` check above should catch
             // this, but a narrow race between the check and the fetch call
             // could let a just-expired token slip through.
+            DiagnosticLog.shared.log(.api, "Credential expired during fetch")
             cachedCredentials = nil
             notificationManager.notifyAuthenticationLost()
             let started = CredentialRefresher.refreshInBackground()
+            if started { isRefreshingCredentials = true }
             state = .error(started
                 ? "Your Claude Code token has expired. Refreshing in the background…"
                 : "Your Claude Code token has expired. Run `claude` to re-authenticate.")
@@ -518,15 +537,19 @@ final class UsageStore {
             // The server rejected the token (401/403). This usually means
             // the token was revoked or is otherwise invalid — running
             // `claude` will re-authenticate.
+            DiagnosticLog.shared.log(.api, "HTTP 401/403 — token rejected")
             cachedCredentials = nil
             notificationManager.notifyAuthenticationLost()
             let started = CredentialRefresher.refreshInBackground()
+            if started { isRefreshingCredentials = true }
             state = .error(started
                 ? "Claude rejected the stored token. Refreshing in the background…"
                 : "Claude rejected the stored token. Run `claude` to re-authenticate.")
         } catch let error as UsageAPIError {
+            DiagnosticLog.shared.log(.api, "API error: \(error.errorDescription ?? "unknown")")
             state = .error(error.errorDescription ?? "Unknown usage API error.")
         } catch {
+            DiagnosticLog.shared.log(.api, "Error: \(error.localizedDescription)")
             state = .error(error.localizedDescription)
         }
     }
