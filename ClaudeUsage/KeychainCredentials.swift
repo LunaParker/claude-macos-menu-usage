@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import Security
 
 /// The decoded OAuth blob written by Claude Code.
 struct ClaudeCredentials: Decodable, Sendable {
@@ -81,20 +82,24 @@ enum KeychainCredentialStore {
     /// account field Claude Code writes after a token refresh), then
     /// falls back to no account filter (the initial-login entry).
     static func load() throws -> ClaudeCredentials {
+        // Primary: /usr/bin/security (silent, no Keychain prompt).
         // Pass 1: account-specific (post-refresh credential).
         if let creds = try? loadViaSecurityCLI(account: NSUserName()) {
-            DiagnosticLog.shared.post(.keychain, "Keychain read succeeded (account: \(NSUserName()))")
+            DiagnosticLog.shared.post(.keychain, "Keychain read succeeded via security CLI (account: \(NSUserName()))")
             return logExpiry(creds)
         }
         // Pass 2: no account filter (initial-login credential).
-        do {
-            let creds = try loadViaSecurityCLI(account: nil)
-            DiagnosticLog.shared.post(.keychain, "Keychain read succeeded (no account filter)")
+        if let creds = try? loadViaSecurityCLI(account: nil) {
+            DiagnosticLog.shared.post(.keychain, "Keychain read succeeded via security CLI (no account filter)")
             return logExpiry(creds)
-        } catch {
-            DiagnosticLog.shared.post(.keychain, "Keychain read failed: \(error.localizedDescription)")
-            throw error
         }
+
+        // Fallback: SecItemCopyMatching. This may trigger a macOS
+        // Keychain access prompt, but ensures the app still works if
+        // Claude Code changes how it writes credentials or if
+        // /usr/bin/security is no longer on the item's ACL.
+        DiagnosticLog.shared.post(.keychain, "security CLI failed, falling back to SecItemCopyMatching")
+        return try loadViaSecItemCopyMatching()
     }
 
     /// Logs the token's expiry status and returns it unchanged.
@@ -106,6 +111,48 @@ enum KeychainCredentialStore {
             : "expires \(formatter.localizedString(for: creds.expirationDate, relativeTo: Date()))"
         DiagnosticLog.shared.post(.keychain, "Token \(relative)")
         return creds
+    }
+
+    /// Fallback: reads the credential directly via the Security framework.
+    /// May trigger a macOS Keychain access prompt if the app isn't on the
+    /// item's ACL (which Claude Code resets on every token refresh).
+    private static func loadViaSecItemCopyMatching() throws -> ClaudeCredentials {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecReturnData as String: true,
+        ]
+
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+
+        switch status {
+        case errSecSuccess:
+            DiagnosticLog.shared.post(.keychain, "SecItemCopyMatching succeeded")
+        case errSecItemNotFound:
+            DiagnosticLog.shared.post(.keychain, "SecItemCopyMatching: item not found")
+            throw KeychainError.itemNotFound
+        case errSecAuthFailed, errSecUserCanceled, errSecInteractionNotAllowed:
+            DiagnosticLog.shared.post(.keychain, "SecItemCopyMatching: access denied (OSStatus \(status))")
+            throw KeychainError.accessDenied(status)
+        default:
+            DiagnosticLog.shared.post(.keychain, "SecItemCopyMatching: unexpected status \(status)")
+            throw KeychainError.unexpectedStatus(status)
+        }
+
+        guard let data = item as? Data else {
+            DiagnosticLog.shared.post(.keychain, "SecItemCopyMatching: data is not Data")
+            throw KeychainError.malformedPayload(nil)
+        }
+
+        do {
+            let envelope = try JSONDecoder().decode(CredentialsEnvelope.self, from: data)
+            return logExpiry(envelope.claudeAiOauth)
+        } catch {
+            DiagnosticLog.shared.post(.keychain, "SecItemCopyMatching: failed to decode payload")
+            throw KeychainError.malformedPayload(error)
+        }
     }
 
     /// Runs `/usr/bin/security find-generic-password` and decodes the

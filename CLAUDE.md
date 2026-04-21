@@ -65,7 +65,7 @@ OAuth credentials are stored by the `claude` CLI in the macOS login keychain:
 - **Service:** `Claude Code-credentials`
 - **Class:** `kSecClassGenericPassword`
 
-**Reading credentials:** The app reads credentials by shelling out to `/usr/bin/security find-generic-password` rather than calling `SecItemCopyMatching`. When Claude Code writes the keychain item, `/usr/bin/security` ends up on the item's ACL, so subsequent reads via the same binary succeed silently — no macOS Keychain access prompt. A two-pass lookup tries the current macOS username as the account field first (the post-refresh entry), then falls back to no account filter (the initial-login entry).
+**Reading credentials:** The app reads credentials by shelling out to `/usr/bin/security find-generic-password` rather than calling `SecItemCopyMatching`. When Claude Code writes the keychain item, `/usr/bin/security` ends up on the item's ACL, so subsequent reads via the same binary succeed silently — no macOS Keychain access prompt. A two-pass lookup tries the current macOS username as the account field first (the post-refresh entry), then falls back to no account filter (the initial-login entry). If both `/usr/bin/security` passes fail, the app falls back to `SecItemCopyMatching` (which may trigger a Keychain prompt but ensures the app still works if the ACL changes).
 
 **JSON envelope shape:**
 ```json
