@@ -2,14 +2,14 @@
 //  OnboardingWindowView.swift
 //  Menu Bar Usage for Claude
 //
-//  The first-run welcome window. Shown *before* the app touches the
-//  Keychain so the user has context for the macOS access prompt that
-//  fires the moment they click Continue.
+//  The first-run welcome window. Shown before the app starts polling
+//  so the user understands what the app does before it begins fetching
+//  usage data.
 //
 //  This window is tied to `SettingsKeys.hasCompletedOnboarding`, whose
 //  value is scoped to the running bundle path — so rebuilding the app
-//  (which moves it to a new DerivedData path and invalidates the
-//  existing Keychain ACL entry) naturally re-shows this window.
+//  (which moves it to a new DerivedData path) or relocating the .app
+//  naturally re-shows this window.
 //
 
 import AppKit
@@ -108,7 +108,7 @@ struct OnboardingWindowView: View {
                 Text("What happens when you click Continue")
                     .font(.subheadline.weight(.semibold))
             }
-            Text("macOS will ask you to allow keychain access for the item named **Claude Code-credentials**. Click **Always Allow** so you don’t get prompted on every launch.")
+            Text("The app will read your Claude Code credentials from the login keychain and start fetching your usage data in the background.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -123,9 +123,7 @@ struct OnboardingWindowView: View {
     private func continueTapped() {
         // Flip the onboarding flag *and* kick off polling in the same
         // user action. `startPolling()` will in turn call `refresh()`,
-        // which is the first time the app touches the Keychain — the
-        // OS prompt appears right now, with the explanation above still
-        // fresh in the user's mind.
+        // which reads the Keychain for the first time.
         hasCompletedOnboarding = true
         usage.startPolling()
         dismissWindow(id: WindowIDs.onboarding)

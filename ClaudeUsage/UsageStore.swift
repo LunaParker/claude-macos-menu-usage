@@ -276,13 +276,11 @@ final class UsageStore {
     private let client = UsageAPIClient()
     private var pollTask: Task<Void, Never>?
 
-    /// In-memory credential cache. The macOS Keychain prompts the user
-    /// every time a *different* app reads an item whose ACL has been
-    /// reset — and the Claude CLI resets it on every token refresh
-    /// (delete + recreate, see anthropics/claude-code#22144). By
-    /// caching, we only hit the Keychain when the cached token is
-    /// expired or the API rejects it, reducing prompts from every
-    /// poll cycle to at most once per token rotation (~2–3×/day).
+    /// In-memory credential cache. Reading credentials launches a
+    /// `/usr/bin/security` subprocess, so we avoid doing it on every
+    /// poll cycle. The cache is invalidated when the token expires or
+    /// the API rejects it, reducing subprocess invocations to at most
+    /// once per token rotation (~2–3×/day).
     private var cachedCredentials: ClaudeCredentials?
 
     /// Allowed user-configurable range for the poll interval, in seconds.

@@ -25,7 +25,7 @@ If you're a Claude Pro or Max subscriber and you use Claude Code, you probably w
   - Live diagnostic counters: total network requests, last attempt, last success, tracking window, average rate
   - Live rate-limit cooldown indicator
   - Force Refresh and Reset Counters actions
-- **First-run onboarding window** — a dedicated Welcome window that explains what the app does and *why* the macOS Keychain prompt is about to appear, *before* the first Keychain access is attempted.
+- **First-run onboarding window** — a dedicated Welcome window that explains what the app does before the first Keychain access is attempted.
 - **Live rate-limit countdown** — when the endpoint responds with HTTP 429, the popover shows a real-time "Retrying in 4m 23s" countdown sourced from the store's `rateLimitedUntil` timestamp, with a minimum 60-second cooldown floor to protect the endpoint even if the server returns `Retry-After: 0`.
 
 ## Authentication
@@ -34,9 +34,9 @@ The app reuses the OAuth credentials that the `claude` CLI already wrote to your
 
 Specifically:
 
-- **Keychain item.** `kSecClassGenericPassword` with service name `Claude Code-credentials`, created by Claude Code when you first run `claude` → `/login`. The data is a JSON blob containing an OAuth access token, refresh token, expiry, scopes, and subscription tier.
+- **Keychain item.** `kSecClassGenericPassword` with service name `Claude Code-credentials`, created by Claude Code when you first run `claude` → `/login`. The data is a JSON blob containing an OAuth access token, refresh token, expiry, scopes, and subscription tier. The app reads it via `/usr/bin/security find-generic-password` rather than `SecItemCopyMatching` — this binary is already on the keychain item's ACL, so reads succeed silently without triggering a macOS Keychain access prompt.
 - **Endpoint.** `GET https://api.anthropic.com/api/oauth/usage`, with headers `Authorization: Bearer <accessToken>` and `anthropic-beta: oauth-2025-04-20`. Returns the session / weekly / Sonnet utilisation windows and the Extra Usage state. This is the same endpoint the `claude` CLI's status line hits.
-- **Sandbox:** Because sandboxed apps can only see Keychain items inside their own access group, and `Claude Code-credentials` is created by a different process (Claude Code), sandboxing is disabled. As such, this app can't be published to the App Store.
+- **Sandbox:** Disabled because the app needs to launch `/usr/bin/security` to read keychain items created by Claude Code, and sandboxed apps cannot spawn arbitrary processes. As such, this app can't be published to the App Store.
 - **What the app does not do:** No analytics, no telemetry, no remote logging. Every network request goes directly from your Mac to `api.anthropic.com` over HTTPS. The OAuth token never leaves your machine.
 
 ## Project Structure
@@ -46,7 +46,7 @@ ClaudeUsage/
 ├── ClaudeUsage.xcodeproj/            # Xcode project
 └── ClaudeUsage/                      # Source tree (PBXFileSystemSynchronizedRootGroup)
     ├── MenuBarUsageForClaudeApp.swift  # @main, scenes, SettingsKeys, WindowIDs, AppReset, MenuBarLabel
-    ├── KeychainCredentials.swift       # SecItemCopyMatching wrapper for Claude Code-credentials
+    ├── KeychainCredentials.swift       # /usr/bin/security wrapper for Claude Code-credentials
     ├── UsageStore.swift                # @Observable store, API client, polling loop, snapshot builder
     ├── UsagePopoverView.swift          # Menu bar popover: bars, Extra Usage card, rate-limit/error views
     ├── OnboardingWindowView.swift      # First-run Welcome window
@@ -87,14 +87,13 @@ ClaudeUsage/
 
 On first launch after a build:
 
-1. The Welcome window appears explaining what's about to happen.
+1. The Welcome window appears explaining what the app does.
 2. Click **Continue**.
-3. macOS prompts for Keychain access to `Claude Code-credentials` — click **Always Allow**.
-4. The three bars populate and the menu bar icon updates.
+3. The three bars populate and the menu bar icon updates.
 
 ### Production deployment
 
-For day-to-day use outside of Xcode, copy the built **`Menu Bar Usage for Claude.app`** into `/Applications`, then launch it from there. This matters for the **Launch at login** feature — `SMAppService.mainApp` registers the current bundle path with LaunchServices, so registering from a DerivedData location causes `.notFound` errors on next login. Running from `/Applications` avoids this entirely. (The app's onboarding flag is hashed against the bundle path, so moving to `/Applications` re-shows the welcome window once — which is also when macOS will ask for a fresh Keychain ACL approval.)
+For day-to-day use outside of Xcode, copy the built **`Menu Bar Usage for Claude.app`** into `/Applications`, then launch it from there. This matters for the **Launch at login** feature — `SMAppService.mainApp` registers the current bundle path with LaunchServices, so registering from a DerivedData location causes `.notFound` errors on next login. Running from `/Applications` avoids this entirely. (The app's onboarding flag is hashed against the bundle path, so moving to `/Applications` re-shows the welcome window once.)
 
 ## License
 

@@ -6,9 +6,7 @@
 //  login keychain under the service name "Claude Code-credentials".
 //
 
-import AppKit
 import Foundation
-import Security
 
 /// The decoded OAuth blob written by Claude Code.
 struct ClaudeCredentials: Decodable, Sendable {
@@ -70,51 +68,86 @@ enum KeychainCredentialStore {
     /// The service name the `claude` CLI writes to.
     private static let service = "Claude Code-credentials"
 
-    /// Reads and decodes the Claude Code OAuth credentials from the login keychain.
+    /// Reads and decodes the Claude Code OAuth credentials from the login
+    /// keychain using `/usr/bin/security`.
     ///
-    /// We query with `kSecMatchLimitOne` and no account filter: there's only ever
-    /// one Claude Code credential per user, but the account field is the local
-    /// username, which we don't want to hard-code.
+    /// `/usr/bin/security` is already on the ACL that Claude Code creates
+    /// when writing the credential, so reads succeed silently without
+    /// triggering a macOS Keychain access prompt — unlike
+    /// `SecItemCopyMatching`, which presents a dialog every time the ACL
+    /// is reset (i.e. after every token refresh by Claude Code).
+    ///
+    /// Two-pass lookup: tries the current macOS username first (the
+    /// account field Claude Code writes after a token refresh), then
+    /// falls back to no account filter (the initial-login entry).
     static func load() throws -> ClaudeCredentials {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecReturnData as String: true,
-        ]
+        // Pass 1: account-specific (post-refresh credential).
+        if let creds = try? loadViaSecurityCLI(account: NSUserName()) {
+            DiagnosticLog.shared.post(.keychain, "Keychain read succeeded (account: \(NSUserName()))")
+            return logExpiry(creds)
+        }
+        // Pass 2: no account filter (initial-login credential).
+        do {
+            let creds = try loadViaSecurityCLI(account: nil)
+            DiagnosticLog.shared.post(.keychain, "Keychain read succeeded (no account filter)")
+            return logExpiry(creds)
+        } catch {
+            DiagnosticLog.shared.post(.keychain, "Keychain read failed: \(error.localizedDescription)")
+            throw error
+        }
+    }
 
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
+    /// Logs the token's expiry status and returns it unchanged.
+    private static func logExpiry(_ creds: ClaudeCredentials) -> ClaudeCredentials {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        let relative = creds.isExpired
+            ? "expired \(formatter.localizedString(for: creds.expirationDate, relativeTo: Date()))"
+            : "expires \(formatter.localizedString(for: creds.expirationDate, relativeTo: Date()))"
+        DiagnosticLog.shared.post(.keychain, "Token \(relative)")
+        return creds
+    }
 
-        switch status {
-        case errSecSuccess:
-            DiagnosticLog.shared.post(.keychain, "Keychain read succeeded")
-        case errSecItemNotFound:
-            DiagnosticLog.shared.post(.keychain, "Keychain item not found")
-            throw KeychainError.itemNotFound
-        case errSecAuthFailed, errSecUserCanceled, errSecInteractionNotAllowed:
-            DiagnosticLog.shared.post(.keychain, "Keychain access denied (OSStatus \(status))")
-            throw KeychainError.accessDenied(status)
-        default:
-            DiagnosticLog.shared.post(.keychain, "Keychain unexpected status: \(status)")
-            throw KeychainError.unexpectedStatus(status)
+    /// Runs `/usr/bin/security find-generic-password` and decodes the
+    /// resulting JSON. Returns the decoded credentials on success;
+    /// throws a `KeychainError` on any failure.
+    private static func loadViaSecurityCLI(account: String?) throws -> ClaudeCredentials {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        var args = ["find-generic-password", "-s", service]
+        if let account {
+            args += ["-a", account]
+        }
+        args.append("-w")
+        process.arguments = args
+
+        let stdout = Pipe()
+        process.standardOutput = stdout
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+        } catch {
+            throw KeychainError.unexpectedStatus(-1)
         }
 
-        guard let data = item as? Data else {
-            DiagnosticLog.shared.post(.keychain, "Keychain data is not Data")
+        // Drain the pipe before waiting so a large payload can't
+        // deadlock against a full pipe buffer (ours is tiny, but
+        // this is the safe ordering).
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            throw KeychainError.itemNotFound
+        }
+
+        guard !data.isEmpty else {
             throw KeychainError.malformedPayload(nil)
         }
 
         do {
             let envelope = try JSONDecoder().decode(CredentialsEnvelope.self, from: data)
-            let creds = envelope.claudeAiOauth
-            let formatter = RelativeDateTimeFormatter()
-            formatter.unitsStyle = .full
-            let relative = creds.isExpired
-                ? "expired \(formatter.localizedString(for: creds.expirationDate, relativeTo: Date()))"
-                : "expires \(formatter.localizedString(for: creds.expirationDate, relativeTo: Date()))"
-            DiagnosticLog.shared.post(.keychain, "Token \(relative)")
-            return creds
+            return envelope.claudeAiOauth
         } catch {
             DiagnosticLog.shared.post(.keychain, "Failed to decode Keychain payload")
             throw KeychainError.malformedPayload(error)

@@ -7,7 +7,7 @@ A native macOS menu bar app (SwiftUI) that displays Claude Code usage quotas —
 - **Bundle ID:** `com.shyowlstudios.ClaudeUsage`
 - **Product name:** `Menu Bar Usage for Claude`
 - **Minimum macOS:** 26.4
-- **Sandbox:** Disabled (required to read Keychain items written by `claude` CLI)
+- **Sandbox:** Disabled (required to launch `/usr/bin/security` to read Keychain items written by `claude` CLI)
 - **Hardened runtime:** Enabled
 - **No external dependencies** — pure SwiftUI + Foundation
 
@@ -25,8 +25,9 @@ ClaudeUsage/
   OnboardingWindowView.swift      — First-run welcome flow, Keychain permission primer
   NotificationManager.swift       — macOS notification delivery, threshold tracking,
                                     session-window rotation detection
-  KeychainCredentials.swift       — Keychain query for Claude Code OAuth credentials,
-                                    credential parsing, background CLI token refresh
+  KeychainCredentials.swift       — /usr/bin/security wrapper for Claude Code OAuth
+                                    credentials, credential parsing, background CLI
+                                    token refresh
   ClaudeUsage.entitlements        — Disables sandbox, hardened runtime defaults
   Assets.xcassets/                — App icon (white gauge on orange gradient), accent color
 ```
@@ -35,12 +36,12 @@ ClaudeUsage/
 
 - **UsageStore** is the single source of truth. All views observe it via `@Environment`.
 - Three refresh entry points (background poll, popover-open debounce, manual button) funnel through one guarded `refresh()` method with re-entrancy, debounce, and rate-limit layers.
-- Onboarding gates polling — Keychain access only happens after the user completes onboarding and understands the permission prompt.
+- Onboarding gates polling — Keychain access only happens after the user completes onboarding.
 - The onboarding flag is scoped to the bundle path hash, so moving the app or rebuilding from DerivedData re-triggers onboarding.
 
 ## Usage API
 
-The app polls `GET https://api.claude.ai/api/oauth/usage` (undocumented endpoint used by Claude Code itself).
+The app polls `GET https://api.anthropic.com/api/oauth/usage` (undocumented endpoint used by Claude Code itself).
 
 **Required headers:**
 - `Authorization: Bearer <accessToken>`
@@ -62,17 +63,21 @@ The response is decoded into a `UsageSnapshot` with pre-computed `Bar` values (f
 
 OAuth credentials are stored by the `claude` CLI in the macOS login keychain:
 - **Service:** `Claude Code-credentials`
-- **Class:** `kSecClassGenericPassword` (no account filter — one credential per user)
+- **Class:** `kSecClassGenericPassword`
+
+**Reading credentials:** The app reads credentials by shelling out to `/usr/bin/security find-generic-password` rather than calling `SecItemCopyMatching`. When Claude Code writes the keychain item, `/usr/bin/security` ends up on the item's ACL, so subsequent reads via the same binary succeed silently — no macOS Keychain access prompt. A two-pass lookup tries the current macOS username as the account field first (the post-refresh entry), then falls back to no account filter (the initial-login entry).
 
 **JSON envelope shape:**
 ```json
 {
-  "accessToken": "...",
-  "refreshToken": "...",
-  "expiresAt": 1234567890000,   // milliseconds since epoch
-  "scopes": ["..."],
-  "subscriptionType": "max",    // or "pro", etc.
-  "rateLimitTier": "..."
+  "claudeAiOauth": {
+    "accessToken": "...",
+    "refreshToken": "...",
+    "expiresAt": 1234567890000,   // milliseconds since epoch
+    "scopes": ["..."],
+    "subscriptionType": "max",    // or "pro", etc.
+    "rateLimitTier": "..."
+  }
 }
 ```
 
