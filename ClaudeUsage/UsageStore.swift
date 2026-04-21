@@ -276,6 +276,12 @@ final class UsageStore {
     /// successful credential load so the Developer tab can display it.
     private(set) var keychainReadMethod: KeychainReadMethod?
 
+    /// Guards against a feedback loop: background `claude` exits →
+    /// retry → still expired → launches another `claude` → exits →
+    /// retry → … The flag is set when a post-refresh retry is
+    /// scheduled and cleared when any refresh succeeds.
+    private var pendingPostRefreshRetry = false
+
     let notificationManager = NotificationManager()
     private let client = UsageAPIClient()
     private var pollTask: Task<Void, Never>?
@@ -352,6 +358,18 @@ final class UsageStore {
         CredentialRefresher.onRefreshEnded = { [weak self] in
             MainActor.assumeIsolated {
                 self?.isRefreshingCredentials = false
+                self?.cachedCredentials = nil
+                // Pick up fresh credentials written by the background
+                // claude process immediately, rather than waiting for
+                // the next poll cycle (up to 5 minutes away). The
+                // pendingPostRefreshRetry flag prevents a loop when
+                // the token is still expired after the retry.
+                guard let self, !self.pendingPostRefreshRetry else { return }
+                self.pendingPostRefreshRetry = true
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .seconds(2))
+                    await self?.refresh()
+                }
             }
         }
         pollTask = makePollTask(fetchImmediately: true)
@@ -393,6 +411,7 @@ final class UsageStore {
     func manualRetry() {
         CredentialRefresher.resetAttemptGuard()
         cachedCredentials = nil
+        pendingPostRefreshRetry = false
         Task { @MainActor [weak self] in
             await self?.refresh()
         }
@@ -505,6 +524,7 @@ final class UsageStore {
             let response = try await client.fetch(using: credentials)
             DiagnosticLog.shared.log(.api, "HTTP 200 — usage data received")
             CredentialRefresher.credentialsBecameValid()
+            pendingPostRefreshRetry = false
             notificationManager.authenticationRestored()
             let snapshot = Self.buildSnapshot(from: response, credentials: credentials)
             state = .loaded(snapshot)
