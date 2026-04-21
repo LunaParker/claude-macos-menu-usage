@@ -95,6 +95,10 @@ On first launch after a build:
 
 For day-to-day use outside of Xcode, copy the built **`Menu Bar Usage for Claude.app`** into `/Applications`, then launch it from there. This matters for the **Launch at login** feature — `SMAppService.mainApp` registers the current bundle path with LaunchServices, so registering from a DerivedData location causes `.notFound` errors on next login. Running from `/Applications` avoids this entirely. (The app's onboarding flag is hashed against the bundle path, so moving to `/Applications` re-shows the welcome window once.)
 
+## Alternatives
+
+- **[Notch Pilot](https://github.com/devmegablaster/Notch-Pilot)** — A macOS app that displays Claude Code usage in the Dynamic Island / notch area. Notch Pilot also reads from the same undocumented usage endpoint and inspired our `/usr/bin/security`-based keychain reading approach, which avoids the macOS Keychain access prompt entirely.
+
 ## License
 
 MIT — see [LICENSE.md](LICENSE.md).
