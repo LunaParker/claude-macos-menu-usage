@@ -180,6 +180,7 @@ enum AppReset {
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
             task.arguments = ["-n", bundleURL.path]
+            task.currentDirectoryURL = URL(fileURLWithPath: "/tmp")
             try? task.run()
             task.waitUntilExit()
             DispatchQueue.main.async {

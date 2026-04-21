@@ -197,6 +197,10 @@ enum CredentialRefresher {
         // discoverable regardless of how it was installed (npm global,
         // Homebrew, volta, etc.).
         process.arguments = ["-l", "-c", "command -v claude &>/dev/null && claude"]
+        // Pin to /tmp so the child process (and the `claude` CLI's
+        // project-context resolution) never touches TCC-protected user
+        // directories like ~/Desktop, ~/Documents, or ~/Downloads.
+        process.currentDirectoryURL = URL(fileURLWithPath: "/tmp")
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
