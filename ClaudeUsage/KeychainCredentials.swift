@@ -65,9 +65,20 @@ enum KeychainError: LocalizedError {
     }
 }
 
+/// Which code path successfully read the credential on the most
+/// recent call to `KeychainCredentialStore.load()`.
+enum KeychainReadMethod {
+    case securityCLI
+    case secItemCopyMatching
+}
+
 enum KeychainCredentialStore {
     /// The service name the `claude` CLI writes to.
     private static let service = "Claude Code-credentials"
+
+    /// The method that last successfully read credentials. Updated on
+    /// every successful `load()` call; `nil` until the first read.
+    private(set) static var lastReadMethod: KeychainReadMethod?
 
     /// Reads and decodes the Claude Code OAuth credentials from the login
     /// keychain using `/usr/bin/security`.
@@ -86,11 +97,13 @@ enum KeychainCredentialStore {
         // Pass 1: account-specific (post-refresh credential).
         if let creds = try? loadViaSecurityCLI(account: NSUserName()) {
             DiagnosticLog.shared.post(.keychain, "Keychain read succeeded via security CLI (account: \(NSUserName()))")
+            lastReadMethod = .securityCLI
             return logExpiry(creds)
         }
         // Pass 2: no account filter (initial-login credential).
         if let creds = try? loadViaSecurityCLI(account: nil) {
             DiagnosticLog.shared.post(.keychain, "Keychain read succeeded via security CLI (no account filter)")
+            lastReadMethod = .securityCLI
             return logExpiry(creds)
         }
 
@@ -99,7 +112,9 @@ enum KeychainCredentialStore {
         // Claude Code changes how it writes credentials or if
         // /usr/bin/security is no longer on the item's ACL.
         DiagnosticLog.shared.post(.keychain, "security CLI failed, falling back to SecItemCopyMatching")
-        return try loadViaSecItemCopyMatching()
+        let creds = try loadViaSecItemCopyMatching()
+        lastReadMethod = .secItemCopyMatching
+        return creds
     }
 
     /// Logs the token's expiry status and returns it unchanged.

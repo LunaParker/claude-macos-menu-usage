@@ -371,6 +371,19 @@ private struct DeveloperSettingsView: View {
             }
 
             Section {
+                LabeledContent("Method") {
+                    authMethodLabel
+                }
+            } header: {
+                Text("Authentication")
+            } footer: {
+                authMethodFooter
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section {
                 HStack {
                     Button("Reset Counters", role: .destructive) {
                         usage.resetDiagnostics()
@@ -500,6 +513,34 @@ private struct DeveloperSettingsView: View {
                 .labelStyle(.titleAndIcon)
                 .foregroundStyle(.red)
                 .lineLimit(2)
+        }
+    }
+
+    @ViewBuilder
+    private var authMethodLabel: some View {
+        switch usage.keychainReadMethod {
+        case .securityCLI:
+            Label("/usr/bin/security", systemImage: "checkmark.shield.fill")
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(.green)
+        case .secItemCopyMatching:
+            Label("SecItemCopyMatching", systemImage: "exclamationmark.triangle.fill")
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(.orange)
+        case nil:
+            Text("Not yet determined")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var authMethodFooter: Text {
+        switch usage.keychainReadMethod {
+        case .securityCLI:
+            Text("You're using the preferred authentication method. Credentials are read silently via /usr/bin/security without triggering a macOS Keychain access prompt.")
+        case .secItemCopyMatching:
+            Text("You're using the fallback authentication method (SecItemCopyMatching). You may be prompted to re-authenticate via a macOS Keychain dialog approximately every 8 hours when Claude Code refreshes your token.")
+        case nil:
+            Text("The authentication method will be shown after the first successful credential read.")
         }
     }
 

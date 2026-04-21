@@ -272,6 +272,10 @@ final class UsageStore {
     /// indicator. Still mutated internally by `refresh()`.
     private(set) var rateLimitedUntil: Date?
 
+    /// Which keychain read path last succeeded. Updated after every
+    /// successful credential load so the Developer tab can display it.
+    private(set) var keychainReadMethod: KeychainReadMethod?
+
     let notificationManager = NotificationManager()
     private let client = UsageAPIClient()
     private var pollTask: Task<Void, Never>?
@@ -333,6 +337,7 @@ final class UsageStore {
         DiagnosticLog.shared.log(.keychain, "Cache miss, loading from Keychain")
         let fresh = try KeychainCredentialStore.load()
         cachedCredentials = fresh
+        keychainReadMethod = KeychainCredentialStore.lastReadMethod
         return fresh
     }
 
