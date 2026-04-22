@@ -596,6 +596,10 @@ struct DiagnosticLogView: View {
             Button("Clear") { log.clear() }
                 .buttonStyle(.borderless)
                 .font(.caption)
+
+            Button("Reveal Log File") { log.revealInFinder() }
+                .buttonStyle(.borderless)
+                .font(.caption)
         }
         .padding(10)
     }

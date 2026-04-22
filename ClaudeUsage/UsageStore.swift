@@ -357,14 +357,16 @@ final class UsageStore {
         Task { await notificationManager.refreshAuthorizationStatus() }
         CredentialRefresher.onRefreshEnded = { [weak self] in
             MainActor.assumeIsolated {
-                self?.isRefreshingCredentials = false
-                self?.cachedCredentials = nil
-                // Pick up fresh credentials written by the background
-                // claude process immediately, rather than waiting for
-                // the next poll cycle (up to 5 minutes away). The
-                // pendingPostRefreshRetry flag prevents a loop when
-                // the token is still expired after the retry.
-                guard let self, !self.pendingPostRefreshRetry else { return }
+                guard let self else { return }
+                // credentialsBecameValid() also calls onRefreshEnded,
+                // but that fires during a normal successful fetch —
+                // not after a background claude process. Only retry
+                // when a real background process just finished.
+                let wasRefreshingInBackground = self.isRefreshingCredentials
+                self.isRefreshingCredentials = false
+                guard wasRefreshingInBackground else { return }
+                self.cachedCredentials = nil
+                guard !self.pendingPostRefreshRetry else { return }
                 self.pendingPostRefreshRetry = true
                 Task { @MainActor [weak self] in
                     try? await Task.sleep(for: .seconds(2))
