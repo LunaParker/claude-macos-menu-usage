@@ -102,6 +102,9 @@ private struct MainContentView: View {
     @Environment(UsageStore.self) private var usage
     @Environment(\.openSettings) private var openSettings
 
+    @AppStorage(SettingsKeys.hideSonnetBarWhenZero)
+    private var hideSonnetBarWhenZero: Bool = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
@@ -213,13 +216,20 @@ private struct MainContentView: View {
         VStack(alignment: .leading, spacing: 14) {
             QuotaBarView(bar: snapshot.session)
             QuotaBarView(bar: snapshot.weekly)
-            if let sonnet = snapshot.sonnet {
+            if let sonnet = snapshot.sonnet, !shouldHideSonnet(sonnet) {
                 QuotaBarView(bar: sonnet)
             }
             if let extra = snapshot.extraUsage {
                 ExtraUsageCard(summary: extra)
             }
         }
+    }
+
+    /// Threshold matches the percent formatter's rounding (0 fraction
+    /// digits): anything under 0.5% renders as "0%", so that's what the
+    /// user perceives as zero.
+    private func shouldHideSonnet(_ bar: UsageSnapshot.Bar) -> Bool {
+        hideSonnetBarWhenZero && bar.fraction < 0.005
     }
 
     // MARK: Footer

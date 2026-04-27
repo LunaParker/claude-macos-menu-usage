@@ -27,6 +27,10 @@ enum SettingsKeys {
         return "hasCompletedOnboarding_\(hex)"
     }()
     static let showSessionPercentInMenuBar = "showSessionPercentInMenuBar"
+    /// When true, the Sonnet bar is omitted from the popover whenever its
+    /// usage rounds to 0%. Max-only — has no effect on Pro accounts where
+    /// the Sonnet bar isn't shown at all.
+    static let hideSonnetBarWhenZero = "hideSonnetBarWhenZero"
     /// Polling interval in seconds. Validated by `UsageStore` against the
     /// allowed range (120–300) — anything outside falls back to the default.
     static let pollIntervalSeconds = "pollIntervalSeconds"

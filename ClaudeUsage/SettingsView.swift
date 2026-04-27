@@ -42,6 +42,9 @@ private struct GeneralSettingsView: View {
     @AppStorage(SettingsKeys.showSessionPercentInMenuBar)
     private var showSessionPercent: Bool = false
 
+    @AppStorage(SettingsKeys.hideSonnetBarWhenZero)
+    private var hideSonnetBarWhenZero: Bool = false
+
     @AppStorage(SettingsKeys.pollIntervalSeconds)
     private var pollIntervalSeconds: Int = defaultPollIntervalSeconds
 
@@ -95,6 +98,20 @@ private struct GeneralSettingsView: View {
                 }
             } header: {
                 Text("Menu Bar")
+            }
+
+            Section {
+                Toggle(isOn: $hideSonnetBarWhenZero) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Hide Sonnet bar at 0%")
+                        Text("Omit the weekly Sonnet bar from the popover when its usage rounds to 0%. Only applies to Max subscribers.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            } header: {
+                Text("Popover")
             }
 
             Section {
