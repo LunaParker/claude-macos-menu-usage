@@ -4,6 +4,8 @@ A native macOS menu bar app that tracks your Claude Code usage quotas — the sa
 
 Built with SwiftUI, `MenuBarExtra`, and Observation for macOS 26+.
 
+![Screenshot of the Menu Bar Usage for Claude popover showing a Current Session bar at 17 percent with 4 hours until reset and a Weekly Limit bar at 2 percent with 8 hours until reset. The macOS menu bar above it shows the app's gauge icon displaying 17 percent.](docs/screenshot.png)
+
 > **Disclaimer.** This project is not affiliated with or endorsed by Anthropic. It reads from an undocumented community-discovered endpoint (`/api/oauth/usage`) that Claude Code itself uses for its status line, authenticated with the OAuth token that the `claude` CLI already stored in your login keychain. The endpoint is not a stable public API and may change or be removed at any time.
 
 ## Purpose
