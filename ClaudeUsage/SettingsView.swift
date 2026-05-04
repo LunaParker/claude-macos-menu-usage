@@ -51,6 +51,31 @@ private struct GeneralSettingsView: View {
     @AppStorage(SettingsKeys.preferredBrowserBundleID)
     private var preferredBrowserBundleID: String = ""
 
+    // Service status preferences
+    @AppStorage(SettingsKeys.serviceStatusEnabled)
+    private var serviceStatusEnabled: Bool = true
+
+    @AppStorage(SettingsKeys.serviceStatusHideWhenOperational)
+    private var serviceStatusHideWhenOperational: Bool = false
+
+    @AppStorage(SettingsKeys.monitorClaudeAI)
+    private var monitorClaudeAI: Bool = true
+
+    @AppStorage(SettingsKeys.monitorClaudeCode)
+    private var monitorClaudeCode: Bool = true
+
+    @AppStorage(SettingsKeys.monitorClaudeAPI)
+    private var monitorClaudeAPI: Bool = false
+
+    @AppStorage(SettingsKeys.monitorClaudeConsole)
+    private var monitorClaudeConsole: Bool = false
+
+    @AppStorage(SettingsKeys.monitorClaudeCowork)
+    private var monitorClaudeCowork: Bool = false
+
+    @AppStorage(SettingsKeys.monitorClaudeForGov)
+    private var monitorClaudeForGov: Bool = false
+
     @Environment(UsageStore.self) private var usage
 
     @State private var browsers: [BrowserHelper.BrowserInfo] = []
@@ -113,6 +138,48 @@ private struct GeneralSettingsView: View {
             } header: {
                 Text("Popover")
             }
+
+            Section {
+                Toggle(isOn: $serviceStatusEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Show Claude service status")
+                        Text("Polls status.claude.com when the popover opens to surface incidents affecting the services you select. No background polling — only on popover open, throttled to one fetch every five minutes.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                Toggle(isOn: $serviceStatusHideWhenOperational) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Only show when degraded")
+                        Text("Hide the status row whenever every monitored service is operational.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .disabled(!serviceStatusEnabled)
+            } header: {
+                Text("Service Status")
+            }
+
+            Section {
+                Toggle(KnownComponent.claudeAI.displayName,       isOn: $monitorClaudeAI)
+                Toggle(KnownComponent.claudeCode.displayName,     isOn: $monitorClaudeCode)
+                Toggle(KnownComponent.claudeAPI.displayName,      isOn: $monitorClaudeAPI)
+                Toggle(KnownComponent.claudeConsole.displayName,  isOn: $monitorClaudeConsole)
+                Toggle(KnownComponent.claudeCowork.displayName,   isOn: $monitorClaudeCowork)
+                Toggle(KnownComponent.claudeForGov.displayName,   isOn: $monitorClaudeForGov)
+            } header: {
+                Text("Services to Monitor")
+            } footer: {
+                Text("claude.ai and Claude Code are monitored by default. Tick others to include their status in the popover row.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .disabled(!serviceStatusEnabled)
 
             Section {
                 Picker(selection: $pollIntervalSeconds) {
@@ -340,6 +407,9 @@ private struct DeveloperSettingsView: View {
     /// Confirmation state for the destructive factory-reset button.
     @State private var showingResetConfirmation: Bool = false
 
+    @AppStorage(SettingsKeys.simulateStatusOutage)
+    private var simulateStatusOutage: Bool = false
+
     var body: some View {
         Form {
             Section {
@@ -431,6 +501,20 @@ private struct DeveloperSettingsView: View {
                 Text("Delivers a test notification to verify that macOS notifications are working for this app. The button is disabled when notification permission hasn't been granted.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle(isOn: $simulateStatusOutage) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Simulate outage of claude.ai and Claude Code")
+                        Text("Renders the popover's service status row with a fabricated major outage so you can preview the degraded look. No network calls are made; the simulation overrides every other status setting while it's on.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            } header: {
+                Text("Status Simulation")
             }
 
             Section {
@@ -661,6 +745,7 @@ struct DiagnosticLogView: View {
         case .keychain: .orange
         case .api: .blue
         case .refresh: .purple
+        case .status: .teal
         }
     }
 }

@@ -100,6 +100,7 @@ private struct SetupRequiredView: View {
 /// completes onboarding — which is what triggers the very first Keychain read.
 private struct MainContentView: View {
     @Environment(UsageStore.self) private var usage
+    @Environment(StatusStore.self) private var status
     @Environment(\.openSettings) private var openSettings
 
     @AppStorage(SettingsKeys.hideSonnetBarWhenZero)
@@ -113,6 +114,8 @@ private struct MainContentView: View {
 
             content
 
+            ServiceStatusRow()
+
             Divider()
 
             footer
@@ -124,6 +127,10 @@ private struct MainContentView: View {
             // moment they click the menu bar icon. Polling itself keeps
             // running in the background regardless of popover state.
             usage.refreshNow()
+            // Fetch the service status only when its TTL has elapsed —
+            // status.claude.com rarely changes and we don't want to hit
+            // it on every popover open.
+            await status.refreshIfStale()
         }
     }
 
@@ -562,4 +569,181 @@ private struct RateLimitedView: View {
         }
         return "\(secs)s"
     }
+}
+
+// MARK: - Service status row
+
+/// SwiftUI styling for `StatusSeverity`, kept here so the data layer
+/// (`StatusStore.swift`) doesn't need to import SwiftUI.
+private extension StatusSeverity {
+    var symbolName: String {
+        switch self {
+        case .operational: return "checkmark.circle.fill"
+        case .maintenance: return "wrench.adjustable.fill"
+        case .minor:       return "exclamationmark.circle.fill"
+        case .major:       return "exclamationmark.triangle.fill"
+        case .critical:    return "exclamationmark.octagon.fill"
+        }
+    }
+
+    var tintColor: Color {
+        switch self {
+        case .operational: return .green
+        case .maintenance: return .blue
+        case .minor:       return .yellow
+        case .major:       return .orange
+        case .critical:    return .red
+        }
+    }
+}
+
+/// Compact row beneath the quota bars summarising the current state of
+/// status.claude.com for the components the user has opted to monitor.
+///
+/// Visibility (decided per-render):
+/// - simulation flag on → always render the simulated payload
+/// - master toggle off → hidden
+/// - state isn't `.loaded` → hidden (we don't render skeletons or
+///   surface fetch errors here; status is auxiliary)
+/// - "hide when operational" on AND nothing degraded → hidden
+private struct ServiceStatusRow: View {
+    @Environment(StatusStore.self) private var status
+
+    @AppStorage(SettingsKeys.serviceStatusEnabled)
+    private var enabled: Bool = true
+
+    @AppStorage(SettingsKeys.serviceStatusHideWhenOperational)
+    private var hideWhenOperational: Bool = false
+
+    @AppStorage(SettingsKeys.simulateStatusOutage)
+    private var simulateOutage: Bool = false
+
+    var body: some View {
+        if let payload = effectivePayload {
+            content(payload)
+        }
+    }
+
+    /// Resolves which snapshot the row should render (real or simulated)
+    /// and whether to render at all. Nil means "hide entirely".
+    private var effectivePayload: (snapshot: StatusSnapshot, simulated: Bool)? {
+        if simulateOutage {
+            return (Self.simulatedSnapshot, true)
+        }
+        guard enabled else { return nil }
+        guard case .loaded(let snapshot) = status.state else { return nil }
+        if hideWhenOperational && snapshot.displaySeverity == .operational {
+            return nil
+        }
+        return (snapshot, false)
+    }
+
+    @ViewBuilder
+    private func content(_ payload: (snapshot: StatusSnapshot, simulated: Bool)) -> some View {
+        let snapshot = payload.snapshot
+        let severity = snapshot.displaySeverity
+
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: severity.symbolName)
+                .font(.subheadline)
+                .foregroundStyle(severity.tintColor)
+                .padding(.top, 1)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(headlineText(for: snapshot))
+                    .font(.subheadline.weight(.medium))
+
+                ForEach(snapshot.affectedComponents) { component in
+                    Text("\(component.name): \(component.severity.componentLabel)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if !snapshot.relevantIncidents.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(snapshot.relevantIncidents) { incident in
+                            incidentRow(incident)
+                        }
+                    }
+                    .padding(.top, 2)
+                }
+
+                if payload.simulated {
+                    Text("Simulated — disable in Settings → Developer")
+                        .font(.caption2)
+                        .italic()
+                        .foregroundStyle(.orange)
+                        .padding(.top, 2)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private func incidentRow(_ incident: StatusSnapshot.Incident) -> some View {
+        if let url = incident.url {
+            Button {
+                // Match the popover's other web-link buttons: dismiss
+                // first so the browser window doesn't end up behind a
+                // floating popover panel.
+                for case let panel as NSPanel in NSApp.windows {
+                    panel.close()
+                }
+                BrowserHelper.open(url)
+            } label: {
+                HStack(spacing: 3) {
+                    Text(incident.name)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    Image(systemName: "arrow.up.forward")
+                        .font(.system(size: 8, weight: .semibold))
+                }
+            }
+            .buttonStyle(.borderless)
+            .font(.caption)
+        } else {
+            Text(incident.name)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func headlineText(for snapshot: StatusSnapshot) -> String {
+        if snapshot.displaySeverity == .operational {
+            return "All monitored services operational"
+        }
+        return snapshot.pageDescription
+    }
+
+    /// The fabricated snapshot rendered when
+    /// `SettingsKeys.simulateStatusOutage` is on. Marks claude.ai and
+    /// Claude Code as a major outage and attaches one fabricated
+    /// incident link to status.claude.com.
+    private static let simulatedSnapshot = StatusSnapshot(
+        displaySeverity: .critical,
+        pageDescription: "Major Service Outage",
+        affectedComponents: [
+            StatusSnapshot.AffectedComponent(
+                id: KnownComponent.claudeAI.rawValue,
+                name: KnownComponent.claudeAI.displayName,
+                severity: .critical
+            ),
+            StatusSnapshot.AffectedComponent(
+                id: KnownComponent.claudeCode.rawValue,
+                name: KnownComponent.claudeCode.displayName,
+                severity: .critical
+            )
+        ],
+        relevantIncidents: [
+            StatusSnapshot.Incident(
+                id: "simulated-incident",
+                name: "Simulated outage (preview)",
+                url: URL(string: "https://status.claude.com")
+            )
+        ],
+        fetchedAt: Date()
+    )
 }

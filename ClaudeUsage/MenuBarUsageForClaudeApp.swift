@@ -44,6 +44,28 @@ enum SettingsKeys {
     /// Bundle identifier of the user's preferred browser for opening web
     /// links (e.g. "com.brave.Browser"). Empty string = system default.
     static let preferredBrowserBundleID = "preferredBrowserBundleID"
+
+    // Service status (status.claude.com)
+    /// Master toggle for the popover's service-status row. When false,
+    /// `StatusStore` performs no fetches and the row is hidden.
+    static let serviceStatusEnabled = "serviceStatusEnabled"
+    /// When true, the status row is hidden whenever every monitored
+    /// component is operational. Doesn't affect fetching — we still need
+    /// to fetch in order to know whether anything is degraded.
+    static let serviceStatusHideWhenOperational = "serviceStatusHideWhenOperational"
+    /// Per-component monitoring opt-ins. Defaults defined on
+    /// `KnownComponent.defaultEnabled`; only `claude.ai` and `Claude Code`
+    /// are on out of the box.
+    static let monitorClaudeAI         = "monitorClaudeAI"
+    static let monitorClaudeCode       = "monitorClaudeCode"
+    static let monitorClaudeAPI        = "monitorClaudeAPI"
+    static let monitorClaudeConsole    = "monitorClaudeConsole"
+    static let monitorClaudeCowork     = "monitorClaudeCowork"
+    static let monitorClaudeForGov     = "monitorClaudeForGov"
+    /// Developer affordance — when true, the popover renders the status
+    /// row using a fabricated outage snapshot so the user can preview the
+    /// degraded look without waiting for a real incident.
+    static let simulateStatusOutage    = "simulateStatusOutage"
 }
 
 /// The stable window id for the welcome/onboarding window opened at launch.
@@ -202,6 +224,7 @@ let defaultPollIntervalSeconds: Int = 300
 @main
 struct MenuBarUsageForClaudeApp: App {
     @State private var usage = UsageStore()
+    @State private var status = StatusStore()
 
     init() {
         // Runs on the main thread before any scenes are constructed, so
@@ -214,6 +237,7 @@ struct MenuBarUsageForClaudeApp: App {
         MenuBarExtra {
             UsagePopoverView()
                 .environment(usage)
+                .environment(status)
         } label: {
             MenuBarLabel(usage: usage)
         }
@@ -228,6 +252,7 @@ struct MenuBarUsageForClaudeApp: App {
         Settings {
             SettingsView()
                 .environment(usage)
+                .environment(status)
         }
 
         Window("Diagnostic Log", id: WindowIDs.diagnosticLog) {

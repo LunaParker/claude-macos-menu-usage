@@ -34,6 +34,7 @@ final class DiagnosticLog {
             case keychain = "Keychain"
             case api = "API"
             case refresh = "Refresh"
+            case status = "Status"
         }
     }
 
