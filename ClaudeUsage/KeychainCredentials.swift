@@ -269,11 +269,20 @@ enum CredentialRefresher {
     /// if a refresh attempt is already in flight or the process
     /// couldn't be launched.
     ///
-    /// The CLI auto-refreshes the OAuth access token during its
-    /// startup sequence using the stored refresh token, then writes
-    /// the updated credentials back to the Keychain. stdin is
-    /// /dev/null so the process exits once startup completes instead
-    /// of blocking on REPL input.
+    /// Runs `claude mcp list` rather than bare `claude` — the bare
+    /// command requires a TTY and exits with "Input must be provided…"
+    /// under stdin-redirect-to-/dev/null, never reaching the OAuth
+    /// refresh step. `claude mcp list` triggers the same auth path,
+    /// exits cleanly in a few seconds, and writes refreshed credentials
+    /// back to the Keychain.
+    ///
+    /// Launches via the user's login shell (looked up from the password
+    /// database) with `-i -l` so both the login-profile (`.zprofile` /
+    /// `.bash_profile`) and the interactive rc file (`.zshrc` /
+    /// `.bashrc`) are sourced. The latter is where modern dev-env
+    /// managers (NVM, Volta, Bun, asdf, manually-added `~/.local/bin`)
+    /// typically put their PATH additions, and without it `command -v
+    /// claude` fails inside the subprocess.
     ///
     /// A timeout kills the process if it hasn't exited within
     /// ``processTimeout`` seconds, and re-arms `hasAttemptedReauth`
@@ -287,11 +296,9 @@ enum CredentialRefresher {
         hasAttemptedReauth = true
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        // Login shell (-l) inherits the user's PATH so `claude` is
-        // discoverable regardless of how it was installed (npm global,
-        // Homebrew, volta, etc.).
-        process.arguments = ["-l", "-c", "command -v claude &>/dev/null && claude"]
+        let shell = userLoginShell()
+        process.executableURL = URL(fileURLWithPath: shell)
+        process.arguments = ["-i", "-l", "-c", "command -v claude &>/dev/null && claude mcp list"]
         // Pin to /tmp so the child process (and the `claude` CLI's
         // project-context resolution) never touches TCC-protected user
         // directories like ~/Desktop, ~/Documents, or ~/Downloads.
@@ -335,6 +342,19 @@ enum CredentialRefresher {
             process.terminate()
         }
         refreshProcess = nil
+    }
+
+    /// Returns the current user's login shell, looked up from the system
+    /// password database. More reliable than reading `$SHELL` because
+    /// LaunchServices-launched GUI apps don't inherit the user's shell
+    /// environment. Falls back to `/bin/zsh` (macOS's default since
+    /// Catalina) if the lookup fails or returns an empty value.
+    private static func userLoginShell() -> String {
+        guard let pw = getpwuid(getuid()), let shellPtr = pw.pointee.pw_shell else {
+            return "/bin/zsh"
+        }
+        let shell = String(cString: shellPtr)
+        return shell.isEmpty ? "/bin/zsh" : shell
     }
 
     /// Schedules a delayed kill for the given process. If the process
