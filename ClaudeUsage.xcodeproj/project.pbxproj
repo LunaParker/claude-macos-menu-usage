@@ -6,8 +6,19 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		BD27A00A2F0000000000001A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = BD1E41E72F8ABD62004D166E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = BD1E41EE2F8ABD62004D166E;
+			remoteInfo = ClaudeUsage;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		BD1E41EF2F8ABD62004D166E /* Menu Bar Usage for Claude.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Menu Bar Usage for Claude.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		BD27A0052F0000000000001A /* ClaudeUsageTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ClaudeUsageTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -16,10 +27,22 @@
 			path = ClaudeUsage;
 			sourceTree = "<group>";
 		};
+		BD27A0062F0000000000001A /* ClaudeUsageTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ClaudeUsageTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		BD1E41EC2F8ABD62004D166E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BD27A0022F0000000000001A /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -33,6 +56,7 @@
 			isa = PBXGroup;
 			children = (
 				BD1E41F12F8ABD62004D166E /* ClaudeUsage */,
+				BD27A0062F0000000000001A /* ClaudeUsageTests */,
 				BD1E41F02F8ABD62004D166E /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,6 +65,7 @@
 			isa = PBXGroup;
 			children = (
 				BD1E41EF2F8ABD62004D166E /* Menu Bar Usage for Claude.app */,
+				BD27A0052F0000000000001A /* ClaudeUsageTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -70,6 +95,29 @@
 			productReference = BD1E41EF2F8ABD62004D166E /* Menu Bar Usage for Claude.app */;
 			productType = "com.apple.product-type.application";
 		};
+		BD27A0042F0000000000001A /* ClaudeUsageTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BD27A0072F0000000000001A /* Build configuration list for PBXNativeTarget "ClaudeUsageTests" */;
+			buildPhases = (
+				BD27A0012F0000000000001A /* Sources */,
+				BD27A0022F0000000000001A /* Frameworks */,
+				BD27A0032F0000000000001A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				BD27A00B2F0000000000001A /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				BD27A0062F0000000000001A /* ClaudeUsageTests */,
+			);
+			name = ClaudeUsageTests;
+			packageProductDependencies = (
+			);
+			productName = ClaudeUsageTests;
+			productReference = BD27A0052F0000000000001A /* ClaudeUsageTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -82,6 +130,10 @@
 				TargetAttributes = {
 					BD1E41EE2F8ABD62004D166E = {
 						CreatedOnToolsVersion = 26.4;
+					};
+					BD27A0042F0000000000001A = {
+						CreatedOnToolsVersion = 26.4;
+						TestTargetID = BD1E41EE2F8ABD62004D166E;
 					};
 				};
 			};
@@ -100,12 +152,20 @@
 			projectRoot = "";
 			targets = (
 				BD1E41EE2F8ABD62004D166E /* ClaudeUsage */,
+				BD27A0042F0000000000001A /* ClaudeUsageTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		BD1E41ED2F8ABD62004D166E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BD27A0032F0000000000001A /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -122,7 +182,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		BD27A0012F0000000000001A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		BD27A00B2F0000000000001A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = BD1E41EE2F8ABD62004D166E /* ClaudeUsage */;
+			targetProxy = BD27A00A2F0000000000001A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		BD1E41F82F8ABD62004D166E /* Debug */ = {
@@ -265,6 +340,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.shyowlstudios.ClaudeUsage;
+				PRODUCT_MODULE_NAME = ClaudeUsage;
 				PRODUCT_NAME = "Menu Bar Usage for Claude";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -297,6 +373,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.shyowlstudios.ClaudeUsage;
+				PRODUCT_MODULE_NAME = ClaudeUsage;
 				PRODUCT_NAME = "Menu Bar Usage for Claude";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -304,6 +381,46 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		BD27A0082F0000000000001A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.4;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.shyowlstudios.ClaudeUsageTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Menu Bar Usage for Claude.app/Contents/MacOS/Menu Bar Usage for Claude";
+			};
+			name = Debug;
+		};
+		BD27A0092F0000000000001A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.4;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.shyowlstudios.ClaudeUsageTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Menu Bar Usage for Claude.app/Contents/MacOS/Menu Bar Usage for Claude";
 			};
 			name = Release;
 		};
@@ -324,6 +441,15 @@
 			buildConfigurations = (
 				BD1E41FB2F8ABD62004D166E /* Debug */,
 				BD1E41FC2F8ABD62004D166E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		BD27A0072F0000000000001A /* Build configuration list for PBXNativeTarget "ClaudeUsageTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BD27A0082F0000000000001A /* Debug */,
+				BD27A0092F0000000000001A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

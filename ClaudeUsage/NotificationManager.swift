@@ -154,7 +154,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         let resetsAt = snapshot.session.resetsAt
 
         // Detect session window rotation (or first evaluation after launch).
-        if !isSameResetTime(resetsAt, trackedResetsAt) {
+        if !Self.isSameResetTime(resetsAt, trackedResetsAt) {
             // Only fire the reset notification when we've actually been
             // tracking a previous window (not on first launch) AND that
             // window reached capacity.
@@ -222,7 +222,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     /// detections that cleared `firedThresholds` and re-fired
     /// notifications. A 2-second tolerance eliminates jitter while
     /// still correctly detecting real 5-hour window rotations.
-    private func isSameResetTime(_ a: Date?, _ b: Date?) -> Bool {
+    nonisolated static func isSameResetTime(_ a: Date?, _ b: Date?) -> Bool {
         switch (a, b) {
         case (nil, nil): return true
         case (nil, _), (_, nil): return false

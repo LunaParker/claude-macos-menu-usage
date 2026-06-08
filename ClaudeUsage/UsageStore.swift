@@ -205,7 +205,7 @@ struct UsageAPIClient {
     /// one second — a `Retry-After: 0` header or an HTTP-date in the past
     /// isn't a useful cooldown hint, so we'd rather fall back to the
     /// store's default backoff than respect a zero.
-    private static func parseRetryAfter(_ value: String?) -> TimeInterval? {
+    static func parseRetryAfter(_ value: String?) -> TimeInterval? {
         guard let value = value?.trimmingCharacters(in: .whitespaces), !value.isEmpty else {
             return nil
         }
@@ -581,7 +581,7 @@ final class UsageStore {
 
     // MARK: Snapshot builder
 
-    private static func buildSnapshot(
+    static func buildSnapshot(
         from response: UsageResponse,
         credentials: ClaudeCredentials
     ) -> UsageSnapshot {

@@ -19,6 +19,14 @@ jobs:
           sudo xcode-select -s "$XCODE"
           xcodebuild -version
 
+      - name: Test
+        run: |
+          xcodebuild -project ClaudeUsage.xcodeproj \
+            -scheme ClaudeUsage \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            test
+
       - name: Build
         run: |
           xcodebuild -project ClaudeUsage.xcodeproj \
