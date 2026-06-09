@@ -269,12 +269,21 @@ enum CredentialRefresher {
     /// if a refresh attempt is already in flight or the process
     /// couldn't be launched.
     ///
-    /// Runs `claude mcp list` rather than bare `claude` — the bare
-    /// command requires a TTY and exits with "Input must be provided…"
-    /// under stdin-redirect-to-/dev/null, never reaching the OAuth
-    /// refresh step. `claude mcp list` triggers the same auth path,
-    /// exits cleanly in a few seconds, and writes refreshed credentials
-    /// back to the Keychain.
+    /// Runs `claude auth status --json` rather than bare `claude` — the
+    /// bare command requires a TTY and exits with "Input must be
+    /// provided…" under stdin-redirect-to-/dev/null, never reaching the
+    /// OAuth refresh step. `auth status` reads the keychain, triggers
+    /// the refresh flow on an expired token, and exits in ~200 ms.
+    ///
+    /// `claude mcp list` (the previous choice) also worked, but it
+    /// walked the merged MCP config tree, which reaches into
+    /// `~/Library/Application Support/Claude/` — Claude Desktop's
+    /// container — to import its server entries. In macOS Sequoia 15+
+    /// that path is gated by the new `kTCCServiceSystemPolicyAppData`
+    /// TCC service, attributed to the responsible parent (us), so the
+    /// background refresh popped a "would like to access data from
+    /// other apps" prompt. `auth status` doesn't touch MCP config at
+    /// all, sidestepping the service entirely.
     ///
     /// Launches via the user's login shell (looked up from the password
     /// database) with `-i -l` so both the login-profile (`.zprofile` /
@@ -298,7 +307,7 @@ enum CredentialRefresher {
         let process = Process()
         let shell = userLoginShell()
         process.executableURL = URL(fileURLWithPath: shell)
-        process.arguments = ["-i", "-l", "-c", "command -v claude &>/dev/null && claude mcp list"]
+        process.arguments = ["-i", "-l", "-c", "command -v claude &>/dev/null && claude auth status --json"]
         // Pin to /tmp so the child process (and the `claude` CLI's
         // project-context resolution) never touches TCC-protected user
         // directories like ~/Desktop, ~/Documents, or ~/Downloads.
