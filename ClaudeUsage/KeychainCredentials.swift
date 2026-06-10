@@ -269,21 +269,24 @@ enum CredentialRefresher {
     /// if a refresh attempt is already in flight or the process
     /// couldn't be launched.
     ///
-    /// Runs `claude auth status --json` rather than bare `claude` — the
-    /// bare command requires a TTY and exits with "Input must be
-    /// provided…" under stdin-redirect-to-/dev/null, never reaching the
-    /// OAuth refresh step. `auth status` reads the keychain, triggers
-    /// the refresh flow on an expired token, and exits in ~200 ms.
+    /// Runs `claude mcp list` rather than bare `claude` — the bare
+    /// command requires a TTY and exits with "Input must be provided…"
+    /// under stdin-redirect-to-/dev/null, never reaching the OAuth
+    /// refresh step. `claude mcp list` triggers the same auth path,
+    /// exits cleanly in a few seconds, and writes refreshed credentials
+    /// back to the Keychain.
     ///
-    /// `claude mcp list` (the previous choice) also worked, but it
-    /// walked the merged MCP config tree, which reaches into
-    /// `~/Library/Application Support/Claude/` — Claude Desktop's
-    /// container — to import its server entries. In macOS Sequoia 15+
-    /// that path is gated by the new `kTCCServiceSystemPolicyAppData`
-    /// TCC service, attributed to the responsible parent (us), so the
-    /// background refresh popped a "would like to access data from
-    /// other apps" prompt. `auth status` doesn't touch MCP config at
-    /// all, sidestepping the service entirely.
+    /// A previous attempt used `claude auth status --json`, which is
+    /// faster (~200 ms) and avoids walking the MCP config tree (where
+    /// `mcp list` reads `~/Library/Application Support/Claude/` and
+    /// triggers Sequoia's `kTCCServiceSystemPolicyAppData` TCC prompt).
+    /// But the diagnostic log proved `auth status` only *reports* the
+    /// cached auth state — it never hits an authenticated endpoint and
+    /// therefore never triggers the OAuth refresh on an expired token.
+    /// Don't go back to `auth status` without first proving (against an
+    /// actually-expired token, not a valid one) that the refresh side
+    /// effect happens. The TCC prompt from `mcp list` is the lesser
+    /// evil: it fires once per cdhash, and "Allow" makes it stick.
     ///
     /// Launches via the user's login shell (looked up from the password
     /// database) with `-i -l` so both the login-profile (`.zprofile` /
@@ -307,7 +310,7 @@ enum CredentialRefresher {
         let process = Process()
         let shell = userLoginShell()
         process.executableURL = URL(fileURLWithPath: shell)
-        process.arguments = ["-i", "-l", "-c", "command -v claude &>/dev/null && claude auth status --json"]
+        process.arguments = ["-i", "-l", "-c", "command -v claude &>/dev/null && claude mcp list"]
         // Pin to /tmp so the child process (and the `claude` CLI's
         // project-context resolution) never touches TCC-protected user
         // directories like ~/Desktop, ~/Documents, or ~/Downloads.
