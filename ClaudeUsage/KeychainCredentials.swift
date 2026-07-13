@@ -26,13 +26,6 @@ struct ClaudeCredentials: Decodable, Sendable {
     var isExpired: Bool {
         expirationDate <= Date()
     }
-
-    /// True if the account is on any "max" tier (Max 5x / Max 20x).
-    /// Used to decide whether the Sonnet-specific bar should appear.
-    var isMaxSubscription: Bool {
-        (subscriptionType ?? "").lowercased().contains("max")
-            || (rateLimitTier ?? "").lowercased().contains("max")
-    }
 }
 
 private struct CredentialsEnvelope: Decodable {

@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-A native macOS menu bar app (SwiftUI) that displays Claude Code usage quotas — session, weekly limit, and Sonnet (for Max subscribers) — by polling the undocumented `/api/oauth/usage` endpoint using OAuth credentials stored in the macOS login keychain by the `claude` CLI.
+A native macOS menu bar app (SwiftUI) that displays Claude Code usage quotas — session and weekly limit — by polling the undocumented `/api/oauth/usage` endpoint using OAuth credentials stored in the macOS login keychain by the `claude` CLI.
 
 - **Bundle ID:** `com.shyowlstudios.ClaudeUsage`
 - **Product name:** `Menu Bar Usage for Claude`
@@ -51,8 +51,7 @@ The app polls `GET https://api.anthropic.com/api/oauth/usage` (undocumented endp
 **Response shape (`UsageResponse`):**
 - `fiveHour` — 5-hour rolling session window (capacity + usage + resetsAt)
 - `sevenDay` — 7-day weekly limit (capacity + usage + resetsAt)
-- `sevenDayOpus` — weekly Opus usage (Max subscribers only)
-- `sevenDaySonnet` — weekly Sonnet usage (Max subscribers only, displayed as a fourth bar)
+- `sevenDayOpus` — weekly Opus usage (Max subscribers only; decoded but not displayed)
 - `extraUsage` — paid overflow credits (used, remaining, monthlyLimit)
 
 The response is decoded into a `UsageSnapshot` with pre-computed `Bar` values (fraction 0...1, percent label, reset time). `peakUtilization` (max of all bar fractions) drives the menu bar icon variant.
@@ -83,7 +82,6 @@ OAuth credentials are stored by the `claude` CLI in the macOS login keychain:
 
 Key computed properties on `ClaudeCredentials`:
 - `isExpired` — compares `expiresAt` (ms) to current time
-- `isMaxSubscription` — determines whether the Sonnet bar should display
 
 **Auto-refresh:** When credentials are expired, `CredentialRefresher.refreshInBackground()` launches the `claude` CLI hidden in the background via `/bin/bash -l -c "command -v claude && claude"` with stdin/stdout/stderr redirected to `/dev/null` and a 30-second timeout. The CLI refreshes the token in the keychain on startup; the app picks up the fresh credentials on the next poll.
 

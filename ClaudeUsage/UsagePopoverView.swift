@@ -2,9 +2,8 @@
 //  UsagePopoverView.swift
 //  Menu Bar Usage for Claude
 //
-//  The window-style popover presented from the menu bar. Mirrors the three
-//  progress bars shown by Claude Desktop: Current Session, Weekly Limit,
-//  and (for Max users) a Sonnet-specific weekly bar.
+//  The window-style popover presented from the menu bar. Mirrors the
+//  progress bars shown by Claude Desktop: Current Session and Weekly Limit.
 //
 
 import AppKit
@@ -95,16 +94,13 @@ private struct SetupRequiredView: View {
 
 // MARK: - Main content (post-onboarding)
 
-/// The regular popover contents: header, three bars, footer.
+/// The regular popover contents: header, quota bars, footer.
 /// Lives in its own view so that its `.task` fires the moment the user
 /// completes onboarding — which is what triggers the very first Keychain read.
 private struct MainContentView: View {
     @Environment(UsageStore.self) private var usage
     @Environment(StatusStore.self) private var status
     @Environment(\.openSettings) private var openSettings
-
-    @AppStorage(SettingsKeys.hideSonnetBarWhenZero)
-    private var hideSonnetBarWhenZero: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -223,20 +219,10 @@ private struct MainContentView: View {
         VStack(alignment: .leading, spacing: 14) {
             QuotaBarView(bar: snapshot.session)
             QuotaBarView(bar: snapshot.weekly)
-            if let sonnet = snapshot.sonnet, !shouldHideSonnet(sonnet) {
-                QuotaBarView(bar: sonnet)
-            }
             if let extra = snapshot.extraUsage {
                 ExtraUsageCard(summary: extra)
             }
         }
-    }
-
-    /// Threshold matches the percent formatter's rounding (0 fraction
-    /// digits): anything under 0.5% renders as "0%", so that's what the
-    /// user perceives as zero.
-    private func shouldHideSonnet(_ bar: UsageSnapshot.Bar) -> Bool {
-        hideSonnetBarWhenZero && bar.fraction < 0.005
     }
 
     // MARK: Footer
@@ -351,7 +337,7 @@ struct QuotaBarView: View {
 
 // MARK: - Extra Usage card
 
-/// Renders the paid-overflow bar under the three quota bars. Only shown
+/// Renders the paid-overflow bar under the quota bars. Only shown
 /// when the user has enabled Extra Usage in their claude.ai account and
 /// the API returned populated numbers.
 ///

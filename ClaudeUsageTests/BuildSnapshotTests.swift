@@ -3,9 +3,8 @@
 //  ClaudeUsageTests
 //
 //  Covers `UsageStore.buildSnapshot`. Most of the function's complexity is
-//  in the conditional inclusion of the Sonnet bar (Max-only) and the
-//  Extra Usage card (requires four populated fields). These tests pin
-//  every "this gets hidden" branch.
+//  in the conditional inclusion of the Extra Usage card (requires four
+//  populated fields). These tests pin every "this gets hidden" branch.
 //
 
 import Foundation
@@ -23,7 +22,7 @@ struct BuildSnapshotTests {
             fiveHour: .init(utilization: 42, resetsAt: nil),
             sevenDay: .init(utilization: 17, resetsAt: nil)
         )
-        let snapshot = UsageStore.buildSnapshot(from: response, credentials: nonMax())
+        let snapshot = UsageStore.buildSnapshot(from: response)
 
         #expect(snapshot.session.fraction == 0.42)
         #expect(snapshot.weekly.fraction == 0.17)
@@ -35,7 +34,7 @@ struct BuildSnapshotTests {
             fiveHour: .init(utilization: nil, resetsAt: nil),
             sevenDay: .init(utilization: nil, resetsAt: nil)
         )
-        let snapshot = UsageStore.buildSnapshot(from: response, credentials: nonMax())
+        let snapshot = UsageStore.buildSnapshot(from: response)
 
         #expect(snapshot.session.fraction == 0)
         #expect(snapshot.weekly.fraction == 0)
@@ -47,7 +46,7 @@ struct BuildSnapshotTests {
             fiveHour: .init(utilization: 150, resetsAt: nil),
             sevenDay: .init(utilization: 100, resetsAt: nil)
         )
-        let snapshot = UsageStore.buildSnapshot(from: response, credentials: nonMax())
+        let snapshot = UsageStore.buildSnapshot(from: response)
 
         #expect(snapshot.session.fraction == 1)
         #expect(snapshot.weekly.fraction == 1)
@@ -59,40 +58,9 @@ struct BuildSnapshotTests {
             fiveHour: .init(utilization: -10, resetsAt: nil),
             sevenDay: .init(utilization: 50, resetsAt: nil)
         )
-        let snapshot = UsageStore.buildSnapshot(from: response, credentials: nonMax())
+        let snapshot = UsageStore.buildSnapshot(from: response)
 
         #expect(snapshot.session.fraction == 0)
-    }
-
-    // MARK: Sonnet bar (Max-only)
-
-    @Test("Sonnet bar appears for Max subscriber when the API returns the window")
-    func sonnetIncludedForMax() {
-        let response = makeResponse(
-            sevenDaySonnet: .init(utilization: 33, resetsAt: nil)
-        )
-        let snapshot = UsageStore.buildSnapshot(from: response, credentials: maxSubscription())
-
-        #expect(snapshot.sonnet != nil)
-        #expect(snapshot.sonnet?.fraction == 0.33)
-    }
-
-    @Test("Sonnet bar is hidden for non-Max accounts even when the API returns it")
-    func sonnetHiddenForNonMax() {
-        let response = makeResponse(
-            sevenDaySonnet: .init(utilization: 33, resetsAt: nil)
-        )
-        let snapshot = UsageStore.buildSnapshot(from: response, credentials: nonMax())
-
-        #expect(snapshot.sonnet == nil)
-    }
-
-    @Test("Sonnet bar is hidden when Max account has no Sonnet window")
-    func sonnetHiddenForMaxWithoutWindow() {
-        let response = makeResponse(sevenDaySonnet: nil)
-        let snapshot = UsageStore.buildSnapshot(from: response, credentials: maxSubscription())
-
-        #expect(snapshot.sonnet == nil)
     }
 
     // MARK: peakUtilization
@@ -103,10 +71,9 @@ struct BuildSnapshotTests {
     func peakAcrossBars() {
         let response = makeResponse(
             fiveHour: .init(utilization: 80, resetsAt: nil),
-            sevenDay: .init(utilization: 20, resetsAt: nil),
-            sevenDaySonnet: .init(utilization: 50, resetsAt: nil)
+            sevenDay: .init(utilization: 20, resetsAt: nil)
         )
-        let snapshot = UsageStore.buildSnapshot(from: response, credentials: maxSubscription())
+        let snapshot = UsageStore.buildSnapshot(from: response)
 
         #expect(snapshot.peakUtilization == 0.8)
     }
@@ -122,10 +89,9 @@ struct BuildSnapshotTests {
         let response = makeResponse(
             fiveHour: .init(utilization: 20, resetsAt: nil),
             sevenDay: .init(utilization: 20, resetsAt: nil),
-            sevenDaySonnet: .init(utilization: 20, resetsAt: nil),
             extraUsage: .init(isEnabled: true, monthlyLimit: 100, usedCredits: 95, utilization: 95)
         )
-        let snapshot = UsageStore.buildSnapshot(from: response, credentials: maxSubscription())
+        let snapshot = UsageStore.buildSnapshot(from: response)
 
         #expect(snapshot.extraUsage != nil)
         #expect(snapshot.peakUtilization == 0.2)
@@ -138,7 +104,7 @@ struct BuildSnapshotTests {
         let response = makeResponse(
             extraUsage: .init(isEnabled: true, monthlyLimit: 100, usedCredits: 38, utilization: 38)
         )
-        let snapshot = UsageStore.buildSnapshot(from: response, credentials: nonMax())
+        let snapshot = UsageStore.buildSnapshot(from: response)
 
         #expect(snapshot.extraUsage != nil)
         #expect(snapshot.extraUsage?.fraction == 0.38)
@@ -152,7 +118,7 @@ struct BuildSnapshotTests {
         let response = makeResponse(
             extraUsage: .init(isEnabled: false, monthlyLimit: 100, usedCredits: 38, utilization: 38)
         )
-        let snapshot = UsageStore.buildSnapshot(from: response, credentials: nonMax())
+        let snapshot = UsageStore.buildSnapshot(from: response)
 
         #expect(snapshot.extraUsage == nil)
     }
@@ -162,7 +128,7 @@ struct BuildSnapshotTests {
         let response = makeResponse(
             extraUsage: .init(isEnabled: true, monthlyLimit: nil, usedCredits: 38, utilization: 38)
         )
-        let snapshot = UsageStore.buildSnapshot(from: response, credentials: nonMax())
+        let snapshot = UsageStore.buildSnapshot(from: response)
 
         #expect(snapshot.extraUsage == nil)
     }
@@ -172,7 +138,7 @@ struct BuildSnapshotTests {
         let response = makeResponse(
             extraUsage: .init(isEnabled: true, monthlyLimit: 0, usedCredits: 0, utilization: 0)
         )
-        let snapshot = UsageStore.buildSnapshot(from: response, credentials: nonMax())
+        let snapshot = UsageStore.buildSnapshot(from: response)
 
         #expect(snapshot.extraUsage == nil)
     }
@@ -182,7 +148,7 @@ struct BuildSnapshotTests {
         let response = makeResponse(
             extraUsage: .init(isEnabled: true, monthlyLimit: 100, usedCredits: nil, utilization: 0)
         )
-        let snapshot = UsageStore.buildSnapshot(from: response, credentials: nonMax())
+        let snapshot = UsageStore.buildSnapshot(from: response)
 
         #expect(snapshot.extraUsage == nil)
     }
@@ -192,7 +158,7 @@ struct BuildSnapshotTests {
         let response = makeResponse(
             extraUsage: .init(isEnabled: true, monthlyLimit: 100, usedCredits: 38, utilization: nil)
         )
-        let snapshot = UsageStore.buildSnapshot(from: response, credentials: nonMax())
+        let snapshot = UsageStore.buildSnapshot(from: response)
 
         #expect(snapshot.extraUsage == nil)
     }
@@ -202,7 +168,7 @@ struct BuildSnapshotTests {
         let response = makeResponse(
             extraUsage: .init(isEnabled: true, monthlyLimit: 100, usedCredits: 130, utilization: 100)
         )
-        let snapshot = UsageStore.buildSnapshot(from: response, credentials: nonMax())
+        let snapshot = UsageStore.buildSnapshot(from: response)
 
         #expect(snapshot.extraUsage?.remaining == 0)
     }
@@ -212,40 +178,13 @@ struct BuildSnapshotTests {
     private func makeResponse(
         fiveHour: UsageWindow? = .init(utilization: 0, resetsAt: nil),
         sevenDay: UsageWindow? = .init(utilization: 0, resetsAt: nil),
-        sevenDaySonnet: UsageWindow? = nil,
         extraUsage: ExtraUsageResponse? = nil
     ) -> UsageResponse {
         UsageResponse(
             fiveHour: fiveHour,
             sevenDay: sevenDay,
             sevenDayOpus: nil,
-            sevenDaySonnet: sevenDaySonnet,
             extraUsage: extraUsage
-        )
-    }
-
-    private func nonMax() -> ClaudeCredentials {
-        ClaudeCredentials(
-            accessToken: "test",
-            refreshToken: "test",
-            // Far in the future so `isExpired` is false (not that
-            // buildSnapshot reads it, but kept defensive against
-            // future changes).
-            expiresAt: Int64(Date().addingTimeInterval(3600).timeIntervalSince1970 * 1000),
-            scopes: [],
-            subscriptionType: "pro",
-            rateLimitTier: nil
-        )
-    }
-
-    private func maxSubscription() -> ClaudeCredentials {
-        ClaudeCredentials(
-            accessToken: "test",
-            refreshToken: "test",
-            expiresAt: Int64(Date().addingTimeInterval(3600).timeIntervalSince1970 * 1000),
-            scopes: [],
-            subscriptionType: "max",
-            rateLimitTier: nil
         )
     }
 }

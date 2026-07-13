@@ -3,7 +3,7 @@
 //  Menu Bar Usage for Claude
 //
 //  Fetches the undocumented `/api/oauth/usage` endpoint that Claude Code uses
-//  for the three progress bars in its status line.
+//  for the progress bars in its status line.
 //
 
 import Foundation
@@ -47,14 +47,12 @@ struct UsageResponse: Decodable, Sendable {
     let fiveHour: UsageWindow?
     let sevenDay: UsageWindow?
     let sevenDayOpus: UsageWindow?
-    let sevenDaySonnet: UsageWindow?
     let extraUsage: ExtraUsageResponse?
 
     enum CodingKeys: String, CodingKey {
         case fiveHour = "five_hour"
         case sevenDay = "seven_day"
         case sevenDayOpus = "seven_day_opus"
-        case sevenDaySonnet = "seven_day_sonnet"
         case extraUsage = "extra_usage"
     }
 }
@@ -65,17 +63,15 @@ struct UsageResponse: Decodable, Sendable {
 struct UsageSnapshot: Sendable {
     var session: Bar
     var weekly: Bar
-    var sonnet: Bar?
     var extraUsage: ExtraUsageSummary?
     var fetchedAt: Date
 
-    /// The highest utilisation across the quota bars (session/weekly/sonnet),
+    /// The highest utilisation across the quota bars (session/weekly),
     /// used to tint the status bar icon. Extra Usage is deliberately
     /// excluded: it represents paid overflow, not remaining free quota,
     /// so mixing it into the "peak" would send the wrong signal.
     var peakUtilization: Double {
-        let bars = [session, weekly, sonnet].compactMap { $0 }
-        return bars.map(\.fraction).max() ?? 0
+        max(session.fraction, weekly.fraction)
     }
 
     struct Bar: Sendable, Identifiable {
@@ -90,7 +86,6 @@ struct UsageSnapshot: Sendable {
         enum Kind: String, Sendable {
             case session
             case weekly
-            case sonnet
         }
     }
 
@@ -528,7 +523,7 @@ final class UsageStore {
             CredentialRefresher.credentialsBecameValid()
             pendingPostRefreshRetry = false
             notificationManager.authenticationRestored()
-            let snapshot = Self.buildSnapshot(from: response, credentials: credentials)
+            let snapshot = Self.buildSnapshot(from: response)
             state = .loaded(snapshot)
             lastUpdated = snapshot.fetchedAt
             rateLimitedUntil = nil
@@ -581,10 +576,7 @@ final class UsageStore {
 
     // MARK: Snapshot builder
 
-    static func buildSnapshot(
-        from response: UsageResponse,
-        credentials: ClaudeCredentials
-    ) -> UsageSnapshot {
+    static func buildSnapshot(from response: UsageResponse) -> UsageSnapshot {
         let session = bar(
             kind: .session,
             title: "Current Session",
@@ -595,16 +587,6 @@ final class UsageStore {
             title: "Weekly Limit",
             window: response.sevenDay
         )
-
-        // The Sonnet bar is Max-only in Claude Desktop/Code. We hide it if:
-        //   • the user isn't on Max, OR
-        //   • the API returned null for that window.
-        let sonnet: UsageSnapshot.Bar?
-        if credentials.isMaxSubscription, let window = response.sevenDaySonnet {
-            sonnet = bar(kind: .sonnet, title: "Sonnet", window: window)
-        } else {
-            sonnet = nil
-        }
 
         // The Extra Usage card only appears if the account has actually
         // enabled paid overflow in claude.ai settings — in which case the
@@ -630,7 +612,6 @@ final class UsageStore {
         return UsageSnapshot(
             session: session,
             weekly: weekly,
-            sonnet: sonnet,
             extraUsage: extraUsage,
             fetchedAt: Date()
         )
