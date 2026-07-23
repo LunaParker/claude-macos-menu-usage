@@ -3,7 +3,9 @@
 //  Menu Bar Usage for Claude
 //
 //  The window-style popover presented from the menu bar. Mirrors the
-//  progress bars shown by Claude Desktop: Current Session and Weekly Limit.
+//  progress bars shown by Claude Desktop: Current Session, Weekly Limit,
+//  and — when the API reports one — a model-scoped weekly bar (currently
+//  Fable, Max plans only).
 //
 
 import AppKit
@@ -219,6 +221,9 @@ private struct MainContentView: View {
         VStack(alignment: .leading, spacing: 14) {
             QuotaBarView(bar: snapshot.session)
             QuotaBarView(bar: snapshot.weekly)
+            if let scoped = snapshot.scopedWeekly {
+                QuotaBarView(bar: scoped)
+            }
             if let extra = snapshot.extraUsage {
                 ExtraUsageCard(summary: extra)
             }

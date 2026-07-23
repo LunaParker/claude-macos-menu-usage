@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-A native macOS menu bar app (SwiftUI) that displays Claude Code usage quotas — session and weekly limit — by polling the undocumented `/api/oauth/usage` endpoint using OAuth credentials stored in the macOS login keychain by the `claude` CLI.
+A native macOS menu bar app (SwiftUI) that displays Claude Code usage quotas — session, weekly limit, and (on Max plans) the model-scoped Fable weekly limit — by polling the undocumented `/api/oauth/usage` endpoint using OAuth credentials stored in the macOS login keychain by the `claude` CLI.
 
 - **Bundle ID:** `com.shyowlstudios.ClaudeUsage`
 - **Product name:** `Menu Bar Usage for Claude`
@@ -52,6 +52,7 @@ The app polls `GET https://api.anthropic.com/api/oauth/usage` (undocumented endp
 - `fiveHour` — 5-hour rolling session window (capacity + usage + resetsAt)
 - `sevenDay` — 7-day weekly limit (capacity + usage + resetsAt)
 - `sevenDayOpus` — weekly Opus usage (Max subscribers only; decoded but not displayed)
+- `limits` — generalised limits array (`kind`, integer `percent` 0–100, `resets_at`, `scope`). The model-scoped weekly quota (currently Fable, Max 5x/20x only) exists **only** here as a `weekly_scoped` entry — there is no `seven_day_fable` field. The bar is presence-gated and titled from `scope.model.display_name`.
 - `extraUsage` — paid overflow credits (used, remaining, monthlyLimit)
 
 The response is decoded into a `UsageSnapshot` with pre-computed `Bar` values (fraction 0...1, percent label, reset time). `peakUtilization` (max of all bar fractions) drives the menu bar icon variant.

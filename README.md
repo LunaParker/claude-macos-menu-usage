@@ -1,6 +1,6 @@
 # Menu Bar Usage for Claude
 
-A native macOS menu bar app that tracks your Claude Code usage quotas — the same progress bars that Claude Desktop shows (*Current Session* and *Weekly Limit*), available at a glance from the menu bar without having to open Claude Desktop or run `claude /status` in a terminal.
+A native macOS menu bar app that tracks your Claude Code usage quotas — the same progress bars that Claude Desktop shows (*Current Session*, *Weekly Limit*, and — on Max plans — *Fable*), available at a glance from the menu bar without having to open Claude Desktop or run `claude /status` in a terminal.
 
 Built with SwiftUI, `MenuBarExtra`, and Observation for macOS 26+.
 
@@ -10,13 +10,14 @@ Built with SwiftUI, `MenuBarExtra`, and Observation for macOS 26+.
 
 ## Purpose
 
-If you're a Claude Pro or Max subscriber and you use Claude Code, you probably want to know how much of your current-session and weekly quotas you have left — without having to open Claude Desktop, context-switch into a terminal, or run `/status` inside an active session. This app puts those two bars in your menu bar, refreshes them every 2–5 minutes in the background, and optionally displays the current session percentage next to the menu bar icon.
+If you're a Claude Pro or Max subscriber and you use Claude Code, you probably want to know how much of your current-session, weekly, and — on Max plans — Fable quotas you have left — without having to open Claude Desktop, context-switch into a terminal, or run `/status` inside an active session. This app puts those bars in your menu bar, refreshes them every 2–5 minutes in the background, and optionally displays the current session percentage next to the menu bar icon.
 
 ## Features
 
-- **Two live quota bars** that mirror Claude Desktop:
+- **Live quota bars** that mirror Claude Desktop:
   - **Current Session** — the 5-hour rolling window
   - **Weekly Limit** — the 7-day rolling all-models window
+  - **Fable** — the model-scoped 7-day window (Max 5x/20x plans only; the bar appears whenever the API reports a model-scoped weekly limit and is titled by the API, so it follows any future rename)
 - **Read-only Extra Usage card** — appears automatically when you enable Extra Usage at [claude.ai/settings/usage](https://claude.ai/settings/usage). Shows used vs. monthly cap, credits remaining, and a link back to the web UI for management.
 - **Menu bar gauge icon** with an SF Symbol that tints itself based on peak utilisation (0% / 33% / 67% / 100%), plus an optional text percentage next to the icon for the current session.
 - **Tabbed Settings window** (`General` + `Developer`):
@@ -36,7 +37,7 @@ The app reuses the OAuth credentials that the `claude` CLI already wrote to your
 Specifically:
 
 - **Keychain item.** `kSecClassGenericPassword` with service name `Claude Code-credentials`, created by Claude Code when you first run `claude` → `/login`. The data is a JSON blob containing an OAuth access token, refresh token, expiry, scopes, and subscription tier. The app reads it via `/usr/bin/security find-generic-password` — this binary is already on the keychain item's ACL, so reads succeed silently without triggering a macOS Keychain access prompt. Falls back to `SecItemCopyMatching` (which may prompt) if the CLI approach fails.
-- **Endpoint.** `GET https://api.anthropic.com/api/oauth/usage`, with headers `Authorization: Bearer <accessToken>` and `anthropic-beta: oauth-2025-04-20`. Returns the session and weekly utilisation windows and the Extra Usage state. This is the same endpoint the `claude` CLI's status line hits.
+- **Endpoint.** `GET https://api.anthropic.com/api/oauth/usage`, with headers `Authorization: Bearer <accessToken>` and `anthropic-beta: oauth-2025-04-20`. Returns the session and weekly utilisation windows, a generalised `limits` array (the only source of the model-scoped Fable quota), and the Extra Usage state. This is the same endpoint the `claude` CLI's status line hits.
 - **Sandbox:** Disabled because the app needs to launch `/usr/bin/security` to read keychain items created by Claude Code, and sandboxed apps cannot spawn arbitrary processes. As such, this app can't be published to the App Store.
 - **What the app does not do:** No analytics, no telemetry, no remote logging. Every network request goes directly from your Mac to `api.anthropic.com` over HTTPS. The OAuth token never leaves your machine.
 

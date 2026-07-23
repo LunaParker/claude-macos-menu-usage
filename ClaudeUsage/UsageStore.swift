@@ -41,18 +41,52 @@ struct ExtraUsageResponse: Decodable, Sendable {
     }
 }
 
+/// One entry in the generalised `limits` array — the successor to the
+/// per-model `seven_day_*` fields. The model-scoped weekly quota
+/// (currently Fable, Max 5x/20x plans only) is exposed *only* here;
+/// there is no legacy `seven_day_fable` field. `percent` is an integer
+/// 0…100 on the wire, and `scope.model.display_name` carries the
+/// user-facing name for the scoped model.
+struct LimitEntry: Decodable, Sendable {
+    let kind: String?
+    let percent: Double?
+    let resetsAt: Date?
+    let scope: Scope?
+
+    struct Scope: Decodable, Sendable {
+        let model: Model?
+
+        struct Model: Decodable, Sendable {
+            let displayName: String?
+
+            enum CodingKeys: String, CodingKey {
+                case displayName = "display_name"
+            }
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case percent
+        case resetsAt = "resets_at"
+        case scope
+    }
+}
+
 /// The full response from `GET https://api.anthropic.com/api/oauth/usage`.
 /// Only the fields we actually render are modelled.
 struct UsageResponse: Decodable, Sendable {
     let fiveHour: UsageWindow?
     let sevenDay: UsageWindow?
     let sevenDayOpus: UsageWindow?
+    let limits: [LimitEntry]?
     let extraUsage: ExtraUsageResponse?
 
     enum CodingKeys: String, CodingKey {
         case fiveHour = "five_hour"
         case sevenDay = "seven_day"
         case sevenDayOpus = "seven_day_opus"
+        case limits
         case extraUsage = "extra_usage"
     }
 }
@@ -63,15 +97,19 @@ struct UsageResponse: Decodable, Sendable {
 struct UsageSnapshot: Sendable {
     var session: Bar
     var weekly: Bar
+    /// The model-scoped weekly quota (currently the Fable limit on Max
+    /// 5x/20x plans). Nil when the API reports no such limit — the bar
+    /// is presence-gated, so plans without the quota never show it.
+    var scopedWeekly: Bar?
     var extraUsage: ExtraUsageSummary?
     var fetchedAt: Date
 
-    /// The highest utilisation across the quota bars (session/weekly),
-    /// used to tint the status bar icon. Extra Usage is deliberately
-    /// excluded: it represents paid overflow, not remaining free quota,
-    /// so mixing it into the "peak" would send the wrong signal.
+    /// The highest utilisation across the quota bars (session/weekly/
+    /// model-scoped), used to tint the status bar icon. Extra Usage is
+    /// deliberately excluded: it represents paid overflow, not remaining
+    /// free quota, so mixing it into the "peak" would send the wrong signal.
     var peakUtilization: Double {
-        max(session.fraction, weekly.fraction)
+        max(session.fraction, weekly.fraction, scopedWeekly?.fraction ?? 0)
     }
 
     struct Bar: Sendable, Identifiable {
@@ -86,6 +124,7 @@ struct UsageSnapshot: Sendable {
         enum Kind: String, Sendable {
             case session
             case weekly
+            case scopedWeekly
         }
     }
 
@@ -588,6 +627,24 @@ final class UsageStore {
             window: response.sevenDay
         )
 
+        // The model-scoped weekly quota (currently Fable) has no legacy
+        // `seven_day_*` field — it exists only as a `weekly_scoped` entry
+        // in the `limits` array, and only on plans that have the quota
+        // (Max 5x/20x). Presence-gated: no entry, no bar. The title comes
+        // from the API so a renamed or re-scoped quota follows along.
+        let scopedWeekly: UsageSnapshot.Bar?
+        if let entry = response.limits?.first(where: { $0.kind == "weekly_scoped" }),
+           let title = entry.scope?.model?.displayName {
+            scopedWeekly = bar(
+                kind: .scopedWeekly,
+                title: title,
+                utilization: entry.percent,
+                resetsAt: entry.resetsAt
+            )
+        } else {
+            scopedWeekly = nil
+        }
+
         // The Extra Usage card only appears if the account has actually
         // enabled paid overflow in claude.ai settings — in which case the
         // endpoint returns populated numbers. If anything required is
@@ -612,6 +669,7 @@ final class UsageStore {
         return UsageSnapshot(
             session: session,
             weekly: weekly,
+            scopedWeekly: scopedWeekly,
             extraUsage: extraUsage,
             fetchedAt: Date()
         )
@@ -622,14 +680,22 @@ final class UsageStore {
         title: String,
         window: UsageWindow?
     ) -> UsageSnapshot.Bar {
-        let raw = window?.utilization ?? 0
-        let fraction = min(max(raw / 100.0, 0), 1)
+        bar(kind: kind, title: title, utilization: window?.utilization, resetsAt: window?.resetsAt)
+    }
+
+    private static func bar(
+        kind: UsageSnapshot.Bar.Kind,
+        title: String,
+        utilization: Double?,
+        resetsAt: Date?
+    ) -> UsageSnapshot.Bar {
+        let fraction = min(max((utilization ?? 0) / 100.0, 0), 1)
         return UsageSnapshot.Bar(
             id: kind,
             title: title,
             fraction: fraction,
             percentLabel: Self.percentFormatter.string(from: NSNumber(value: fraction)) ?? "0%",
-            resetsAt: window?.resetsAt
+            resetsAt: resetsAt
         )
     }
 

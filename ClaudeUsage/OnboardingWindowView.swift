@@ -31,8 +31,8 @@ struct OnboardingWindowView: View {
             VStack(alignment: .leading, spacing: 14) {
                 OnboardingWindowRow(
                     icon: "chart.bar.xaxis",
-                    title: "Two bars, just like Claude Desktop",
-                    detail: "Current session and weekly limit, refreshed in the background."
+                    title: "Your quota bars, just like Claude Desktop",
+                    detail: "Current session, weekly limit, and — on Max plans — your weekly Fable allowance."
                 )
 
                 OnboardingWindowRow(
