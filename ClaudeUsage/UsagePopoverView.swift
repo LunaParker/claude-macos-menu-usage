@@ -233,6 +233,20 @@ private struct MainContentView: View {
     // MARK: Footer
 
     private var footer: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            footerRow
+            // A 429 while the bars are loaded keeps the stale snapshot on
+            // screen (see `UsageStore.fetchUsage`), so without this line a
+            // cooldown is invisible: the popover looks normal and quietly
+            // refuses to refresh. The line hides itself once the countdown
+            // clears, and `rateLimitedUntil` is nilled on the next success.
+            if case .loaded = usage.state, let clearAt = usage.rateLimitedUntil {
+                CooldownFooterLine(clearAt: clearAt)
+            }
+        }
+    }
+
+    private var footerRow: some View {
         HStack(spacing: 8) {
             if case .loaded = usage.state, let lastUpdated = usage.lastUpdated {
                 Text("Updated \(lastUpdated, style: .relative) ago")
@@ -546,12 +560,16 @@ private struct RateLimitedView: View {
         if remaining <= 0 {
             return "The cooldown has cleared. The next scheduled poll will fetch fresh data."
         }
-        return "Claude’s usage endpoint is temporarily rate-limiting us. Retrying in \(Self.format(remaining))."
+        return "Claude’s usage endpoint is temporarily rate-limiting us. Retrying in \(RateLimitCountdown.format(remaining))."
     }
+}
 
+/// Pure formatting shared by `RateLimitedView` and `CooldownFooterLine`,
+/// kept free of SwiftUI so it can be unit-tested.
+enum RateLimitCountdown {
     /// Formats a duration as `"Mm SSs"` or `"SSs"` depending on magnitude.
     /// Rounds up so the countdown never flashes "0s" before actually clearing.
-    private static func format(_ seconds: TimeInterval) -> String {
+    static func format(_ seconds: TimeInterval) -> String {
         let total = max(1, Int(seconds.rounded(.up)))
         let minutes = total / 60
         let secs = total % 60
@@ -559,6 +577,43 @@ private struct RateLimitedView: View {
             return String(format: "%dm %02ds", minutes, secs)
         }
         return "\(secs)s"
+    }
+
+    /// The footer line for an active cooldown, or `nil` once it has
+    /// cleared (the next scheduled poll fetches fresh data on its own, so
+    /// there is nothing left to say).
+    static func footerText(clearAt: Date, now: Date) -> String? {
+        let remaining = clearAt.timeIntervalSince(now)
+        guard remaining > 0 else { return nil }
+        return "Rate-limited by Claude · retrying in \(format(remaining))"
+    }
+}
+
+/// One-line live countdown shown under the footer while a 429 cooldown
+/// is active and a snapshot is still on screen. Ticks every second and
+/// renders nothing once the cooldown has cleared.
+private struct CooldownFooterLine: View {
+    let clearAt: Date
+
+    @State private var now: Date = Date()
+    private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        Group {
+            if let text = RateLimitCountdown.footerText(clearAt: clearAt, now: now) {
+                HStack(spacing: 4) {
+                    Image(systemName: "hourglass")
+                        .foregroundStyle(.orange)
+                    Text(text)
+                        .foregroundStyle(.secondary)
+                }
+                .font(.caption2)
+                .monospacedDigit()
+                .lineLimit(1)
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .onReceive(ticker) { now = $0 }
     }
 }
 
