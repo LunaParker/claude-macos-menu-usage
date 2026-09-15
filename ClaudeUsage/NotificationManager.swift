@@ -73,29 +73,70 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         [.banner, .sound, .list]
     }
 
-    /// Handles notification interactions:
-    /// - Auth-lost: launches a hidden `claude` process to refresh credentials.
-    /// - Usage threshold: opens the Claude usage settings page in the browser.
+    /// Handles notification interactions by mapping them to an
+    /// ``Interaction`` and performing it on the main actor. The mapping is
+    /// a pure static function so it can be unit-tested without a
+    /// `UNNotificationResponse`, which has no public initialiser.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
         let category = response.notification.request.content.categoryIdentifier
         let action = response.actionIdentifier
+        guard let interaction = Self.interaction(category: category, action: action) else { return }
+        await MainActor.run { self.perform(interaction) }
+    }
 
+    // MARK: - Interaction routing
+
+    /// What a notification interaction asks the app to do.
+    nonisolated enum Interaction: Equatable, Sendable {
+        /// The auth-lost notification was clicked, or its "Reauthenticate"
+        /// button pressed.
+        case reauthenticate
+        /// The "Manage Usage" button on a threshold notification was pressed.
+        case openUsageSettings
+    }
+
+    /// Invoked for ``Interaction/reauthenticate``. `UsageStore` wires this
+    /// to `manualRetry()` in `startPolling()` so the notification runs the
+    /// same path as the popover's "Try again" button: clear the credential
+    /// cache, reset the retry guards, re-read the Keychain, and only then
+    /// launch `claude` if the token is genuinely expired.
+    ///
+    /// The previous implementation called `CredentialRefresher` directly
+    /// from the delegate callback. That launched the CLI but never told
+    /// the store, so nothing re-read the Keychain until the next poll
+    /// tick — the notification appeared to do nothing, while clicking the
+    /// menu bar icon (which does re-read) worked immediately.
+    var reauthenticateHandler: (() -> Void)?
+
+    /// Maps a delivered notification's category and the action the user
+    /// chose to the ``Interaction`` it represents, or `nil` when nothing
+    /// should happen (dismissal, or clicking a banner with no click
+    /// behaviour).
+    nonisolated static func interaction(category: String, action: String) -> Interaction? {
         switch (category, action) {
-        case (Self.authLostCategoryIdentifier, UNNotificationDefaultActionIdentifier),
-             (Self.authLostCategoryIdentifier, Self.reauthActionIdentifier):
-            CredentialRefresher.resetAttemptGuard()
-            CredentialRefresher.refreshInBackground()
-
-        case (Self.thresholdCategoryIdentifier, Self.manageUsageActionIdentifier):
-            if let url = URL(string: "https://claude.ai/settings/usage") {
-                await MainActor.run { BrowserHelper.open(url) }
-            }
-
+        case (authLostCategoryIdentifier, UNNotificationDefaultActionIdentifier),
+             (authLostCategoryIdentifier, reauthActionIdentifier):
+            return .reauthenticate
+        case (thresholdCategoryIdentifier, manageUsageActionIdentifier):
+            return .openUsageSettings
         default:
-            break
+            return nil
+        }
+    }
+
+    /// Performs an interaction. Split from the delegate callback so tests
+    /// can drive it directly.
+    func perform(_ interaction: Interaction) {
+        switch interaction {
+        case .reauthenticate:
+            reauthenticateHandler?()
+        case .openUsageSettings:
+            if let url = URL(string: "https://claude.ai/settings/usage") {
+                BrowserHelper.open(url)
+            }
         }
     }
 

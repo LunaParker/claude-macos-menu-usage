@@ -388,6 +388,9 @@ final class UsageStore {
     func startPolling() {
         guard pollTask == nil else { return }
         notificationManager.registerAsDelegate()
+        notificationManager.reauthenticateHandler = { [weak self] in
+            self?.manualRetry()
+        }
         Task { await notificationManager.refreshAuthorizationStatus() }
         CredentialRefresher.onRefreshEnded = { [weak self] in
             MainActor.assumeIsolated {
@@ -438,16 +441,28 @@ final class UsageStore {
         }
     }
 
-    /// Called when the user explicitly clicks "Try again" or the manual
-    /// refresh button. Resets the credential-refresh deduplication guard
-    /// before refreshing so a new background `claude` process can be
-    /// launched if a prior auto-refresh attempt failed silently — the
-    /// background poll's guard would otherwise leave the user stuck on
-    /// a "Run `claude` to re-authenticate" message with no recourse.
+    /// Called when the user explicitly asks for another attempt: the
+    /// popover's "Try again" button, or the auth-lost notification's
+    /// "Reauthenticate" action. Drops the credential cache and clears the
+    /// post-refresh retry guard, then refreshes — which re-reads the
+    /// Keychain (picking up a token some other Claude Code process may
+    /// already have rotated) and only launches `claude` if the token is
+    /// genuinely expired. Without the guard resets, the background poll's
+    /// deduplication would leave the user stuck on a "Run `claude` to
+    /// re-authenticate" message with no recourse.
+    ///
+    /// The launch-deduplication guard is reset only when no background
+    /// `claude` is running. The popover hides "Try again" during a
+    /// refresh, but the notification action can arrive mid-refresh, and
+    /// killing the in-flight process there would only restart its ~20 s
+    /// startup from zero. Left alone, its exit triggers the post-refresh
+    /// retry, which the cleared `pendingPostRefreshRetry` now permits.
     func manualRetry() {
-        CredentialRefresher.resetAttemptGuard()
         cachedCredentials = nil
         pendingPostRefreshRetry = false
+        if !isRefreshingCredentials {
+            CredentialRefresher.resetAttemptGuard()
+        }
         Task { @MainActor [weak self] in
             await self?.refresh()
         }
@@ -531,12 +546,7 @@ final class UsageStore {
         if credentials.isExpired {
             cachedCredentials = nil
             DiagnosticLog.shared.log(.refresh, "Token expired, attempting background refresh")
-            notificationManager.notifyAuthenticationLost()
-            let started = CredentialRefresher.refreshInBackground()
-            if started { isRefreshingCredentials = true }
-            state = .error(started
-                ? "Your Claude Code token has expired. Refreshing in the background…"
-                : "Your Claude Code token has expired. Run `claude` to re-authenticate.")
+            handleAuthenticationLost(reason: "Your Claude Code token has expired.")
             return
         }
 
@@ -548,6 +558,24 @@ final class UsageStore {
             state = .loading
         }
 
+        await fetchUsage(using: credentials, retryOnRotation: true)
+    }
+
+    /// Performs one request against the usage endpoint and applies the
+    /// outcome to `state`.
+    ///
+    /// - Parameter retryOnRotation: When `true`, a 401/403 is first treated
+    ///   as a possible token rotation rather than a lost login: the
+    ///   credential cache is dropped, the Keychain re-read, and if it now
+    ///   holds a different, unexpired token the request is retried once
+    ///   with it — silently, with no notification and no background
+    ///   `claude` launch. Claude Code rotates the access token whenever it
+    ///   refreshes and the previous token is rejected immediately, so a
+    ///   401 on a cached token usually means another Claude Code process
+    ///   (typically the user's terminal session) already did the work.
+    ///   The diagnostic log showed nearly every "Authentication Lost"
+    ///   notification was this case.
+    private func fetchUsage(using credentials: ClaudeCredentials, retryOnRotation: Bool) async {
         // Count this as a real network attempt. Placed after all the
         // early-return guards so the counter only reflects requests that
         // actually hit the wire — the Developer tab uses this to verify
@@ -581,29 +609,24 @@ final class UsageStore {
             if case .loaded = state { return }
             state = .error(UsageAPIError.rateLimited(retryAfter: backoff).errorDescription ?? "Rate limited.")
         } catch UsageAPIError.credentialExpired {
-            // Safety net — the early `isExpired` check above should catch
-            // this, but a narrow race between the check and the fetch call
-            // could let a just-expired token slip through.
+            // Safety net — the early `isExpired` check in `refresh()` should
+            // catch this, but a narrow race between the check and the fetch
+            // call could let a just-expired token slip through.
             DiagnosticLog.shared.log(.api, "Credential expired during fetch")
             cachedCredentials = nil
-            notificationManager.notifyAuthenticationLost()
-            let started = CredentialRefresher.refreshInBackground()
-            if started { isRefreshingCredentials = true }
-            state = .error(started
-                ? "Your Claude Code token has expired. Refreshing in the background…"
-                : "Your Claude Code token has expired. Run `claude` to re-authenticate.")
+            handleAuthenticationLost(reason: "Your Claude Code token has expired.")
         } catch UsageAPIError.unauthorized {
-            // The server rejected the token (401/403). This usually means
-            // the token was revoked or is otherwise invalid — running
-            // `claude` will re-authenticate.
             DiagnosticLog.shared.log(.api, "HTTP 401/403 — token rejected")
             cachedCredentials = nil
-            notificationManager.notifyAuthenticationLost()
-            let started = CredentialRefresher.refreshInBackground()
-            if started { isRefreshingCredentials = true }
-            state = .error(started
-                ? "Claude rejected the stored token. Refreshing in the background…"
-                : "Claude rejected the stored token. Run `claude` to re-authenticate.")
+            if retryOnRotation,
+               let rotated = Self.rotatedCredentials(replacing: credentials, reloaded: try? loadCredentials()) {
+                DiagnosticLog.shared.log(.keychain, "Keychain holds a newer token — retrying silently")
+                await fetchUsage(using: rotated, retryOnRotation: false)
+                return
+            }
+            // The Keychain has nothing better to offer, so the token really
+            // was revoked or invalidated — running `claude` re-authenticates.
+            handleAuthenticationLost(reason: "Claude rejected the stored token.")
         } catch let error as UsageAPIError {
             DiagnosticLog.shared.log(.api, "API error: \(error.errorDescription ?? "unknown")")
             state = .error(error.errorDescription ?? "Unknown usage API error.")
@@ -611,6 +634,39 @@ final class UsageStore {
             DiagnosticLog.shared.log(.api, "Error: \(error.localizedDescription)")
             state = .error(error.localizedDescription)
         }
+    }
+
+    /// Decides whether a rejected token should be retried with credentials
+    /// re-read from the Keychain. Returns the reloaded credentials when they
+    /// carry a different, unexpired access token; `nil` when the re-read
+    /// failed, returned the same token (no rotation happened), or returned
+    /// a token that is itself expired — that case needs the background
+    /// `claude` refresh, not another request.
+    static func rotatedCredentials(
+        replacing rejected: ClaudeCredentials,
+        reloaded: ClaudeCredentials?
+    ) -> ClaudeCredentials? {
+        guard let reloaded,
+              reloaded.accessToken != rejected.accessToken,
+              !reloaded.isExpired
+        else { return nil }
+        return reloaded
+    }
+
+    /// Shared tail of every authentication-loss path: fire the one-shot
+    /// notification, launch the background `claude` refresh (a no-op when
+    /// one is already running), and set an error state whose wording
+    /// reflects whether a refresh is actually in progress — including one
+    /// that was already running before this call, which is what happens
+    /// when the popover opens or the notification is tapped mid-refresh.
+    private func handleAuthenticationLost(reason: String) {
+        notificationManager.notifyAuthenticationLost()
+        if CredentialRefresher.refreshInBackground() {
+            isRefreshingCredentials = true
+        }
+        state = .error(isRefreshingCredentials
+            ? "\(reason) Refreshing in the background…"
+            : "\(reason) Run `claude` to re-authenticate.")
     }
 
     // MARK: Snapshot builder

@@ -35,7 +35,8 @@ ClaudeUsage/
 ### Architecture
 
 - **UsageStore** is the single source of truth. All views observe it via `@Environment`.
-- Three refresh entry points (background poll, popover-open debounce, manual button) funnel through one guarded `refresh()` method with re-entrancy, debounce, and rate-limit layers.
+- Four refresh entry points funnel through one guarded `refresh()` method with re-entrancy, debounce, and rate-limit layers: the background poll, the popover-open debounce, the popover's "Try again" button, and the auth-lost notification's "Reauthenticate" action. The last two share `manualRetry()`, which drops the credential cache and resets the retry guards first. The notification must go through the store (never `CredentialRefresher` directly), or nothing re-reads the Keychain afterwards.
+- A 401/403 on a cached token is treated as a possible token rotation first: the store re-reads the Keychain and silently retries once if it finds a different, unexpired token (Claude Code rotates the access token on every refresh and the old one is rejected immediately). Only if that fails does it notify and launch the background CLI refresh.
 - Onboarding gates polling — Keychain access only happens after the user completes onboarding.
 - The onboarding flag is scoped to the bundle path hash, so moving the app or rebuilding from DerivedData re-triggers onboarding.
 
@@ -84,7 +85,7 @@ OAuth credentials are stored by the `claude` CLI in the macOS login keychain:
 Key computed properties on `ClaudeCredentials`:
 - `isExpired` — compares `expiresAt` (ms) to current time
 
-**Auto-refresh:** When credentials are expired, `CredentialRefresher.refreshInBackground()` launches the `claude` CLI hidden in the background via `/bin/bash -l -c "command -v claude && claude"` with stdin/stdout/stderr redirected to `/dev/null` and a 30-second timeout. The CLI refreshes the token in the keychain on startup; the app picks up the fresh credentials on the next poll.
+**Auto-refresh:** When credentials are expired (or a 401 survives the Keychain re-read), `CredentialRefresher.refreshInBackground()` launches `claude mcp list` hidden in the background through the user's login shell (`<shell> -i -l -c "command -v claude &>/dev/null && claude mcp list"`, cwd `/tmp`, stdin/stdout/stderr on `/dev/null`, 30-second timeout). Bare `claude` needs a TTY and never reaches the OAuth refresh; `claude auth status` only reports cached state. The CLI writes the refreshed token to the keychain on startup. When the process exits, `UsageStore` clears its credential cache and re-fetches two seconds later (one automatic retry per outage, re-armed by `manualRetry()`).
 
 ## Notification Threshold Logic
 
