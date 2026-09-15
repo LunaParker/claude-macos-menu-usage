@@ -601,16 +601,14 @@ private struct CooldownFooterLine: View {
     var body: some View {
         Group {
             if let text = RateLimitCountdown.footerText(clearAt: clearAt, now: now) {
-                HStack(spacing: 4) {
-                    Image(systemName: "hourglass")
-                        .foregroundStyle(.orange)
-                    Text(text)
-                        .foregroundStyle(.secondary)
-                }
-                .font(.caption2)
-                .monospacedDigit()
-                .lineLimit(1)
-                .accessibilityElement(children: .combine)
+                // The symbol is interpolated into the text run rather than
+                // placed in an HStack so it is laid out as a glyph on the
+                // same line: an HStack centres the image's own box, which
+                // sits visibly lower than the caption text.
+                Text("\(Text(Image(systemName: "hourglass")).foregroundStyle(.orange)) \(Text(text).foregroundStyle(.secondary))")
+                    .font(.caption2)
+                    .monospacedDigit()
+                    .lineLimit(1)
             }
         }
         .onReceive(ticker) { now = $0 }
