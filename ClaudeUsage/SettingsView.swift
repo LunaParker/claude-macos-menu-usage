@@ -611,6 +611,10 @@ private struct DeveloperSettingsView: View {
             Label("SecItemCopyMatching", systemImage: "exclamationmark.triangle.fill")
                 .labelStyle(.titleAndIcon)
                 .foregroundStyle(.orange)
+        case .credentialsFile:
+            Label("~/.claude/.credentials.json", systemImage: "doc.text.fill")
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(.orange)
         case nil:
             Text("Not yet determined")
                 .foregroundStyle(.secondary)
@@ -623,6 +627,8 @@ private struct DeveloperSettingsView: View {
             Text("You're using the preferred authentication method. Credentials are read silently via /usr/bin/security without triggering a macOS Keychain access prompt.")
         case .secItemCopyMatching:
             Text("You're using the fallback authentication method (SecItemCopyMatching). You may be prompted to re-authenticate via a macOS Keychain dialog approximately every 8 hours when Claude Code refreshes your token.")
+        case .credentialsFile:
+            Text("Claude Code is keeping its credentials in ~/.claude/.credentials.json because its last Keychain write failed. It moves them back to the Keychain on its next successful write, usually the next token refresh.")
         case nil:
             Text("The authentication method will be shown after the first successful credential read.")
         }

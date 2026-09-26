@@ -454,8 +454,8 @@ final class UsageStore {
     /// The launch-deduplication guard is reset only when no background
     /// `claude` is running. The popover hides "Try again" during a
     /// refresh, but the notification action can arrive mid-refresh, and
-    /// killing the in-flight process there would only restart its ~20 s
-    /// startup from zero. Left alone, its exit triggers the post-refresh
+    /// resetting the guard there would only start a second `claude`
+    /// alongside the first. Left alone, its exit triggers the post-refresh
     /// retry, which the cleared `pendingPostRefreshRetry` now permits.
     func manualRetry() {
         cachedCredentials = nil

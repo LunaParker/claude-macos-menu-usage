@@ -444,7 +444,7 @@ private struct MissingCredentialsView: View {
                     .font(.subheadline.weight(.semibold))
             }
 
-            Text("Menu Bar Usage for Claude reads your Claude Code OAuth credentials from the macOS Keychain, but it couldn’t find an entry for **Claude Code-credentials**.")
+            Text("Menu Bar Usage for Claude couldn’t find your Claude Code OAuth credentials, either in the macOS Keychain (**Claude Code-credentials**) or in **~/.claude/.credentials.json**.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
