@@ -32,6 +32,12 @@ private struct CredentialsEnvelope: Decodable {
     let claudeAiOauth: ClaudeCredentials
 }
 
+/// The plaintext file also holds MCP servers' OAuth tokens, so it can exist
+/// without a Claude login in it.
+private struct CredentialsFileEnvelope: Decodable {
+    let claudeAiOauth: ClaudeCredentials?
+}
+
 enum KeychainError: LocalizedError {
     /// The generic-password item is missing entirely — Claude Code was never
     /// authenticated on this machine (or the credential was wiped).
@@ -41,19 +47,19 @@ enum KeychainError: LocalizedError {
     case accessDenied(OSStatus)
     /// The underlying Security call returned an unexpected status.
     case unexpectedStatus(OSStatus)
-    /// The data in the Keychain item didn't match the expected JSON shape.
+    /// The Keychain item or credentials file didn't match the expected JSON shape.
     case malformedPayload(Error?)
 
     var errorDescription: String? {
         switch self {
         case .itemNotFound:
-            return "Couldn’t find Claude Code credentials in your Keychain."
+            return "Couldn’t find Claude Code credentials in your Keychain or ~/.claude/.credentials.json."
         case .accessDenied(let status):
             return "Keychain access was denied (OSStatus \(status))."
         case .unexpectedStatus(let status):
             return "Unexpected Keychain error (OSStatus \(status))."
         case .malformedPayload:
-            return "The Keychain entry exists but couldn’t be decoded."
+            return "Claude Code’s stored credentials exist but couldn’t be decoded."
         }
     }
 }
@@ -63,6 +69,8 @@ enum KeychainError: LocalizedError {
 enum KeychainReadMethod {
     case securityCLI
     case secItemCopyMatching
+    /// Claude Code's plaintext fallback, `~/.claude/.credentials.json`.
+    case credentialsFile
 }
 
 enum KeychainCredentialStore {
@@ -84,7 +92,8 @@ enum KeychainCredentialStore {
     ///
     /// Two-pass lookup: tries the current macOS username first (the
     /// account field Claude Code writes after a token refresh), then
-    /// falls back to no account filter (the initial-login entry).
+    /// falls back to no account filter (the initial-login entry). With no
+    /// Keychain item at all, reads Claude Code's plaintext file instead.
     static func load() throws -> ClaudeCredentials {
         // Primary: /usr/bin/security (silent, no Keychain prompt).
         // Pass 1: account-specific (post-refresh credential).
@@ -105,9 +114,24 @@ enum KeychainCredentialStore {
         // Claude Code changes how it writes credentials or if
         // /usr/bin/security is no longer on the item's ACL.
         DiagnosticLog.shared.post(.keychain, "security CLI failed, falling back to SecItemCopyMatching")
-        let creds = try loadViaSecItemCopyMatching()
-        lastReadMethod = .secItemCopyMatching
-        return creds
+        do {
+            let creds = try loadViaSecItemCopyMatching()
+            lastReadMethod = .secItemCopyMatching
+            return creds
+        } catch KeychainError.itemNotFound {
+            // Claude Code deletes its Keychain item when a Keychain write
+            // fails and keeps the credentials in this file instead.
+            let creds: ClaudeCredentials
+            do {
+                creds = try loadFromCredentialsFile()
+            } catch {
+                DiagnosticLog.shared.post(.keychain, "No usable credentials in ~/.claude/.credentials.json either")
+                throw error
+            }
+            DiagnosticLog.shared.post(.keychain, "Read succeeded via ~/.claude/.credentials.json (Claude Code's plaintext fallback)")
+            lastReadMethod = .credentialsFile
+            return logExpiry(creds)
+        }
     }
 
     /// Logs the token's expiry status and returns it unchanged.
@@ -161,6 +185,29 @@ enum KeychainCredentialStore {
             DiagnosticLog.shared.post(.keychain, "SecItemCopyMatching: failed to decode payload")
             throw KeychainError.malformedPayload(error)
         }
+    }
+
+    /// Where Claude Code stores its credentials when it can't write them to
+    /// the Keychain.
+    static let credentialsFileURL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".claude/.credentials.json")
+
+    /// Decodes Claude Code's plaintext credential file. A missing file, or one
+    /// without a Claude login in it, throws `itemNotFound`.
+    static func loadFromCredentialsFile(at url: URL = credentialsFileURL) throws -> ClaudeCredentials {
+        guard let data = try? Data(contentsOf: url) else {
+            throw KeychainError.itemNotFound
+        }
+        let envelope: CredentialsFileEnvelope
+        do {
+            envelope = try JSONDecoder().decode(CredentialsFileEnvelope.self, from: data)
+        } catch {
+            throw KeychainError.malformedPayload(error)
+        }
+        guard let credentials = envelope.claudeAiOauth else {
+            throw KeychainError.itemNotFound
+        }
+        return credentials
     }
 
     /// Runs `/usr/bin/security find-generic-password` and decodes the
@@ -237,23 +284,23 @@ enum CredentialRefresher {
     private static let processTimeout: TimeInterval = 30
 
     /// Called by `UsageStore` after a successful API fetch proves the
-    /// credentials are valid. Re-arms the reauth trigger and terminates
-    /// any lingering background process.
+    /// credentials are valid. Re-arms the reauth trigger and detaches
+    /// any lingering background process, leaving it to finish on its own.
     static func credentialsBecameValid() {
         DiagnosticLog.shared.post(.refresh, "Credentials validated, clearing refresh state")
         hasAttemptedReauth = false
-        terminateProcess()
+        detachProcess()
         onRefreshEnded?()
     }
 
-    /// Clears the deduplication guard and kills any in-flight background
+    /// Clears the deduplication guard and detaches any in-flight background
     /// process so the very next call to ``refreshInBackground()`` will
     /// launch a fresh `claude`. Used by the popover's manual retry path
     /// — when the user explicitly clicks "Try again", they're asking for
     /// a new attempt regardless of whether one already happened this
     /// expiry cycle.
     static func resetAttemptGuard() {
-        terminateProcess()
+        detachProcess()
         hasAttemptedReauth = false
     }
 
@@ -342,10 +389,9 @@ enum CredentialRefresher {
 
     // MARK: - Private
 
-    private static func terminateProcess() {
-        if let process = refreshProcess, process.isRunning {
-            process.terminate()
-        }
+    /// Stops tracking the background process without signalling it: a SIGTERM
+    /// mid-write makes Claude Code move its credentials out of the Keychain.
+    private static func detachProcess() {
         refreshProcess = nil
     }
 

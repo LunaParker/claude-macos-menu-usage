@@ -26,8 +26,8 @@ ClaudeUsage/
   NotificationManager.swift       — macOS notification delivery, threshold tracking,
                                     session-window rotation detection
   KeychainCredentials.swift       — /usr/bin/security wrapper for Claude Code OAuth
-                                    credentials, credential parsing, background CLI
-                                    token refresh
+                                    credentials, ~/.claude/.credentials.json fallback,
+                                    credential parsing, background CLI token refresh
   ClaudeUsage.entitlements        — Disables sandbox, hardened runtime defaults
   Assets.xcassets/                — App icon (white gauge on orange gradient), accent color
 ```
@@ -68,6 +68,8 @@ OAuth credentials are stored by the `claude` CLI in the macOS login keychain:
 
 **Reading credentials:** The app reads credentials by shelling out to `/usr/bin/security find-generic-password` rather than calling `SecItemCopyMatching`. When Claude Code writes the keychain item, `/usr/bin/security` ends up on the item's ACL, so subsequent reads via the same binary succeed silently — no macOS Keychain access prompt. A two-pass lookup tries the current macOS username as the account field first (the post-refresh entry), then falls back to no account filter (the initial-login entry). If both `/usr/bin/security` passes fail, the app falls back to `SecItemCopyMatching` (which may trigger a Keychain prompt but ensures the app still works if the ACL changes).
 
+**Plaintext fallback:** When a Keychain write fails (a non-zero `security` exit; a timeout doesn't count), Claude Code writes the same JSON to `~/.claude/.credentials.json` and **deletes the Keychain item**. Its next successful Keychain write moves the credentials back and deletes the file. So when `SecItemCopyMatching` also reports the item missing, `load()` reads that file (`KeychainReadMethod.credentialsFile`). The file also holds MCP servers' OAuth tokens (`mcpOAuth`), so it can exist without a `claudeAiOauth` entry, which reads as not signed in.
+
 **JSON envelope shape:**
 ```json
 {
@@ -85,7 +87,7 @@ OAuth credentials are stored by the `claude` CLI in the macOS login keychain:
 Key computed properties on `ClaudeCredentials`:
 - `isExpired` — compares `expiresAt` (ms) to current time
 
-**Auto-refresh:** When credentials are expired (or a 401 survives the Keychain re-read), `CredentialRefresher.refreshInBackground()` launches `claude mcp list` hidden in the background through the user's login shell (`<shell> -i -l -c "command -v claude &>/dev/null && claude mcp list"`, cwd `/tmp`, stdin/stdout/stderr on `/dev/null`, 30-second timeout). Bare `claude` needs a TTY and never reaches the OAuth refresh; `claude auth status` only reports cached state. The CLI writes the refreshed token to the keychain on startup. When the process exits, `UsageStore` clears its credential cache and re-fetches two seconds later (one automatic retry per outage, re-armed by `manualRetry()`).
+**Auto-refresh:** When credentials are expired (or a 401 survives the Keychain re-read), `CredentialRefresher.refreshInBackground()` launches `claude mcp list` hidden in the background through the user's login shell (`<shell> -i -l -c "command -v claude &>/dev/null && claude mcp list"`, cwd `/tmp`, stdin/stdout/stderr on `/dev/null`, 30-second timeout). Bare `claude` needs a TTY and never reaches the OAuth refresh; `claude auth status` only reports cached state. The CLI writes the refreshed token to the keychain on startup. When the process exits, `UsageStore` clears its credential cache and re-fetches two seconds later (one automatic retry per outage, re-armed by `manualRetry()`). A successful fetch or a manual retry only **detaches** from a still-running refresh process and never signals it: SIGTERMing `claude` mid-write fails its Keychain write and triggers the plaintext fallback above. That happened on 2026-09-26, when a kill landed as the CLI resumed after a DarkWake. Only the 30-second timeout kills the process.
 
 ## Notification Threshold Logic
 
