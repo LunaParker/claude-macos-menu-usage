@@ -224,22 +224,31 @@ enum KeychainCredentialStore {
         process.arguments = args
 
         let stdout = Pipe()
+        let stderr = Pipe()
         process.standardOutput = stdout
-        process.standardError = FileHandle.nullDevice
+        process.standardError = stderr
 
+        let pass = account.map { "account: \($0)" } ?? "no account filter"
         do {
             try process.run()
         } catch {
+            DiagnosticLog.shared.post(.keychain, "security CLI (\(pass)) failed to launch: \(error.localizedDescription)")
             throw KeychainError.unexpectedStatus(-1)
         }
 
-        // Drain the pipe before waiting so a large payload can't
+        // Drain the pipes before waiting so a large payload can't
         // deadlock against a full pipe buffer (ours is tiny, but
         // this is the safe ordering).
         let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        let errorOutput = stderr.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
 
         guard process.terminationStatus == 0 else {
+            // The exit code is the OSStatus's low byte: 44 is errSecItemNotFound.
+            let reason = String(decoding: errorOutput, as: UTF8.self)
+                .replacingOccurrences(of: "security: ", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            DiagnosticLog.shared.post(.keychain, "security CLI (\(pass)) exited \(process.terminationStatus): \(reason.isEmpty ? "no error output" : reason)")
             throw KeychainError.itemNotFound
         }
 
