@@ -430,6 +430,17 @@ private struct DeveloperSettingsView: View {
                 LabeledContent("Rate-limit cooldown") {
                     rateLimitLabel
                 }
+                LabeledContent("Token refresh") {
+                    Text(authPhaseDescription)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                LabeledContent("Claude CLI") {
+                    Text(UserDefaults.standard.string(forKey: ClaudeCLILocator.cachedPathKey) ?? "Not located yet")
+                        .foregroundStyle(.secondary)
+                        .truncationMode(.middle)
+                        .lineLimit(1)
+                }
             } header: {
                 Text("Store State")
             }
@@ -624,6 +635,19 @@ private struct DeveloperSettingsView: View {
             Text("Claude Code is keeping its credentials in ~/.claude/.credentials.json because its last Keychain write failed. It moves them back to the Keychain on its next successful write, usually the next token refresh.")
         case nil:
             Text("The authentication method will be shown after the first successful credential read.")
+        }
+    }
+
+    private var authPhaseDescription: String {
+        switch usage.auth {
+        case .ok:
+            "Idle"
+        case .refreshing(let attempt, let pid, let strategy):
+            "Attempt \(attempt) running (PID \(pid), \(strategy.logDescription))"
+        case .checking(let attempt, _):
+            "Checking attempt \(attempt)"
+        case .waiting(let failed, let until):
+            "\(failed) failed; next attempt \(until.formatted(date: .omitted, time: .shortened))"
         }
     }
 

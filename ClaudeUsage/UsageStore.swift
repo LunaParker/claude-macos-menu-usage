@@ -17,6 +17,7 @@ final class UsageStore {
     struct Dependencies {
         var credentials: any CredentialSource
         var fetcher: any UsageFetching
+        var refresher: any CredentialRefreshing
         var notifier: any UsageNotifying
         var scheduler: any Scheduler
         var now: () -> Date
@@ -26,6 +27,7 @@ final class UsageStore {
             Dependencies(
                 credentials: KeychainCredentialSource(),
                 fetcher: UsageAPIClient(),
+                refresher: ClaudeRefreshService(),
                 notifier: notifier,
                 scheduler: LiveScheduler(),
                 now: Date.init,
@@ -40,7 +42,7 @@ final class UsageStore {
         case popover
         /// "Try again", the Reauthenticate notification or Force Refresh.
         case manual
-        /// A quick retry after a transient failure.
+        /// A quick retry after a transient failure, or the next refresh attempt.
         case retry
         /// A background `claude` refresh just exited.
         case postRefresh
@@ -53,8 +55,16 @@ final class UsageStore {
     private(set) var lastUpdated: Date?
     private(set) var rateLimitedUntil: Date?
 
-    /// True while a background `claude` process is refreshing the token.
-    private(set) var isRefreshingCredentials = false
+    /// Where the background token refresh stands.
+    private(set) var auth: AuthPhase = .ok
+
+    /// True from a refresh's launch until the store has checked its result.
+    var isRefreshingCredentials: Bool {
+        switch auth {
+        case .refreshing, .checking: true
+        case .ok, .waiting: false
+        }
+    }
 
     /// Which read path last produced credentials, for the Developer tab.
     private(set) var keychainReadMethod: KeychainReadMethod?
@@ -78,11 +88,11 @@ final class UsageStore {
     @ObservationIgnored private let dependencies: Dependencies
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var retryWork: ScheduledWork?
+    @ObservationIgnored private var authWork: ScheduledWork?
     @ObservationIgnored private var consecutiveTransientFailures = 0
 
-    /// Stops a background refresh whose token is still expired from starting
-    /// another one straight away; cleared by a success or a manual retry.
-    @ObservationIgnored private var pendingPostRefreshRetry = false
+    /// A post-refresh check or manual retry that arrived mid-refresh runs once that ends.
+    @ObservationIgnored private var rerunRequested = false
 
     /// Reading credentials launches `security`, so they're cached until the
     /// token expires or the API rejects it.
@@ -122,22 +132,6 @@ final class UsageStore {
     /// Starts the background poll loop. A second call while polling is a no-op.
     func startPolling() {
         guard pollTask == nil else { return }
-        CredentialRefresher.onRefreshEnded = { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                // credentialsBecameValid() also lands here after a normal
-                // successful fetch; only a background process exit should retry.
-                let wasRefreshingInBackground = self.isRefreshingCredentials
-                self.isRefreshingCredentials = false
-                guard wasRefreshingInBackground else { return }
-                self.cachedCredentials = nil
-                guard !self.pendingPostRefreshRetry else { return }
-                self.pendingPostRefreshRetry = true
-                self.dependencies.scheduler.schedule(after: .seconds(2)) { [weak self] in
-                    await self?.refresh(trigger: .postRefresh)
-                }
-            }
-        }
         pollTask = makePollTask(fetchImmediately: true)
     }
 
@@ -158,17 +152,21 @@ final class UsageStore {
         Task { await refresh(trigger: .popover) }
     }
 
-    /// "Try again" and the Reauthenticate notification: drop the credential
-    /// cache and the retry guards, then refresh, which re-reads the Keychain and
-    /// only launches `claude` if the token really has expired.
+    /// "Try again" and the Reauthenticate notification.
     func manualRetry() {
+        Task { await retryManually() }
+    }
+
+    /// Drops the credential cache and any refresh backoff, then refreshes, which
+    /// re-reads the Keychain and only launches `claude` if the token is unusable.
+    /// A refresh already running is left alone; its exit triggers the check.
+    func retryManually() async {
         cachedCredentials = nil
-        pendingPostRefreshRetry = false
-        // Resetting while a refresh runs would start a second `claude` beside it.
-        if !isRefreshingCredentials {
-            CredentialRefresher.resetAttemptGuard()
+        if case .waiting = auth {
+            auth = .ok
+            authWork?.cancel()
         }
-        Task { await refresh(trigger: .manual) }
+        await refresh(trigger: .manual)
     }
 
     /// Wipes the diagnostic counters so the request rate can be measured afresh.
@@ -197,7 +195,12 @@ final class UsageStore {
     /// Fetches usage unless a refresh is in flight, the popover debounce
     /// applies or a 429 cooldown is running.
     func refresh(trigger: Trigger = .manual) async {
-        guard !isRefreshing else { return }
+        guard !isRefreshing else {
+            if trigger == .postRefresh || trigger == .manual {
+                rerunRequested = true
+            }
+            return
+        }
         let now = dependencies.now()
         if trigger == .popover, let lastUpdated, now.timeIntervalSince(lastUpdated) < popoverDebounceInterval {
             return
@@ -207,8 +210,16 @@ final class UsageStore {
         }
 
         isRefreshing = true
-        defer { isRefreshing = false }
+        await performRefresh()
+        isRefreshing = false
 
+        if rerunRequested {
+            rerunRequested = false
+            await refresh(trigger: .manual)
+        }
+    }
+
+    private func performRefresh() async {
         let credentials: ClaudeCredentials
         do {
             credentials = try await loadCredentials()
@@ -224,9 +235,8 @@ final class UsageStore {
         }
 
         if credentials.isExpired {
-            cachedCredentials = nil
-            DiagnosticLog.shared.log(.refresh, "Token expired, attempting background refresh")
-            handleAuthenticationLost()
+            DiagnosticLog.shared.log(.refresh, "Token expired")
+            handleUnusableToken()
             return
         }
 
@@ -272,7 +282,7 @@ final class UsageStore {
                 await fetchUsage(using: rotated, retryOnRotation: false)
                 return
             }
-            handleAuthenticationLost()
+            handleUnusableToken()
         } catch UsageAPIError.transport(let error) {
             DiagnosticLog.shared.log(.api, "API error: Network error: \(error.localizedDescription)")
             failedTransiently(.offline(error.localizedDescription))
@@ -286,8 +296,14 @@ final class UsageStore {
     }
 
     private func succeeded(with response: UsageResponse) {
-        CredentialRefresher.credentialsBecameValid()
-        pendingPostRefreshRetry = false
+        if auth != .ok {
+            // A refresh still running is detached, not killed: a SIGTERM mid-write
+            // makes Claude Code move its credentials out of the Keychain.
+            DiagnosticLog.shared.log(.refresh, "Credentials work again, ending the refresh outage")
+            auth = .ok
+            authWork?.cancel()
+            authWork = nil
+        }
         retryWork?.cancel()
         retryWork = nil
         consecutiveTransientFailures = 0
@@ -325,13 +341,84 @@ final class UsageStore {
         return reloaded
     }
 
-    /// The token expired or was rejected: notify, launch the background refresh
-    /// (a no-op when one is running) and say which of the two is happening.
-    private func handleAuthenticationLost() {
-        dependencies.notifier.authenticationLost()
-        if CredentialRefresher.refreshInBackground() {
-            isRefreshingCredentials = true
+    // MARK: Background token refresh
+
+    /// The token expired or was rejected and no rotated one was found.
+    private func handleUnusableToken() {
+        cachedCredentials = nil
+        switch auth {
+        case .ok:
+            startRefresh(attempt: 1)
+        case .refreshing:
+            failure = .refreshingSignIn
+        case .checking(let attempt, let strategy):
+            attemptFailed(attempt: attempt, strategy: strategy)
+        case .waiting(let failedAttempts, let until):
+            // A second of slack, so a scheduled retry that wakes a hair early still starts.
+            if dependencies.now().addingTimeInterval(1) >= until {
+                startRefresh(attempt: failedAttempts + 1)
+            }
         }
-        failure = isRefreshingCredentials ? .refreshingSignIn : .signInExpired(nextAttempt: nil)
+    }
+
+    private func startRefresh(attempt: Int) {
+        let start = dependencies.refresher.start(attempt: attempt) { [weak self] exit in
+            self?.refreshExited(exit)
+        }
+        switch start {
+        case .started(let pid, let strategy):
+            auth = .refreshing(attempt: attempt, pid: pid, strategy: strategy)
+            failure = .refreshingSignIn
+        case .failed:
+            attemptFailed(attempt: attempt, strategy: nil)
+        }
+    }
+
+    private func refreshExited(_ exit: ClaudeCLIRefresher.Exit) {
+        let note = exit.cliNotFound ? " (claude isn't on the login shell's PATH)" : exit.wasKilled ? " (killed)" : ""
+        DiagnosticLog.shared.log(.refresh, "Process \(exit.pid) exited with code \(exit.status)\(note)")
+        guard case .refreshing(let attempt, let pid, let strategy) = auth, pid == exit.pid else {
+            DiagnosticLog.shared.log(.refresh, "No longer waiting on process \(exit.pid); ignoring its exit")
+            return
+        }
+
+        if exit.cliNotFound {
+            let until = dependencies.now().addingTimeInterval(RefreshPolicy.cliNotFoundRetry)
+            auth = .waiting(failedAttempts: attempt, until: until)
+            failure = .claudeNotFound
+            dependencies.notifier.authenticationLost()
+            scheduleRefreshAttempt(after: RefreshPolicy.cliNotFoundRetry)
+            return
+        }
+
+        auth = .checking(attempt: attempt, strategy: strategy)
+        cachedCredentials = nil
+        authWork?.cancel()
+        authWork = dependencies.scheduler.schedule(after: .seconds(2)) { [weak self] in
+            await self?.refresh(trigger: .postRefresh)
+        }
+    }
+
+    /// The attempt ended without a working token: back off, and tell the user
+    /// when the policy says the outage is real.
+    private func attemptFailed(attempt: Int, strategy: RefreshStrategy?) {
+        let decision = RefreshPolicy.afterFailure(attempt: attempt, strategy: strategy)
+        let until = dependencies.now().addingTimeInterval(decision.retryIn)
+        auth = .waiting(failedAttempts: attempt, until: until)
+        DiagnosticLog.shared.log(.refresh, "Attempt \(attempt) didn't produce a working token; next attempt in \(Int(decision.retryIn)) s")
+        if decision.notify {
+            failure = .signInExpired(nextAttempt: until)
+            dependencies.notifier.authenticationLost()
+        } else {
+            failure = .refreshingSignIn
+        }
+        scheduleRefreshAttempt(after: decision.retryIn)
+    }
+
+    private func scheduleRefreshAttempt(after seconds: TimeInterval) {
+        authWork?.cancel()
+        authWork = dependencies.scheduler.schedule(after: .seconds(seconds)) { [weak self] in
+            await self?.refresh(trigger: .retry)
+        }
     }
 }

@@ -180,87 +180,62 @@ final class ClaudeCLIRefresher {
 
 // MARK: - Background refresh
 
-/// Starts background refreshes for `UsageStore` and reports when they end.
-enum CredentialRefresher {
-    /// Set while a refresh is running; cleared when it exits or credentials work again.
-    private(set) static var hasAttemptedReauth = false
+nonisolated enum RefreshStart: Equatable, Sendable {
+    case started(pid: Int32, strategy: RefreshStrategy)
+    case failed(String)
+}
 
-    /// Called on the main actor when the tracked refresh process exits, and
-    /// from `credentialsBecameValid()`.
-    static var onRefreshEnded: (() -> Void)?
+/// Starts background token refreshes for `UsageStore`.
+protocol CredentialRefreshing: AnyObject {
+    /// Launches attempt `attempt` of an outage (1 is the first); `onExit` runs
+    /// on the main actor when the process ends.
+    func start(attempt: Int, onExit: @escaping @MainActor @Sendable (ClaudeCLIRefresher.Exit) -> Void) -> RefreshStart
+}
 
-    private static var activePID: Int32?
-    private static var attemptsThisOutage = 0
-    private static let launcher = ClaudeCLIRefresher()
+/// Finds `claude`, picks the launch strategy for the attempt and launches it.
+final class ClaudeRefreshService: CredentialRefreshing {
+    private let launcher = ClaudeCLIRefresher()
+    private let defaults: UserDefaults
 
-    /// Called after a successful fetch. Re-arms the next outage and detaches any
-    /// running refresh without signalling it: a SIGTERM mid-write makes Claude
-    /// Code move its credentials out of the Keychain.
-    static func credentialsBecameValid() {
-        DiagnosticLog.shared.log(.refresh, "Credentials validated, clearing refresh state")
-        hasAttemptedReauth = false
-        attemptsThisOutage = 0
-        activePID = nil
-        onRefreshEnded?()
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
     }
 
-    /// Lets the next `refreshInBackground()` launch even if one already ran this outage.
-    static func resetAttemptGuard() {
-        activePID = nil
-        hasAttemptedReauth = false
-    }
-
-    /// Launches a refresh unless one is already running. Returns whether one started.
-    @discardableResult
-    static func refreshInBackground() -> Bool {
-        guard !hasAttemptedReauth else {
-            DiagnosticLog.shared.log(.refresh, "Skipped: refresh already attempted")
-            return false
-        }
-        hasAttemptedReauth = true
-        attemptsThisOutage += 1
-
-        let cached = UserDefaults.standard.string(forKey: ClaudeCLILocator.cachedPathKey).map { URL(fileURLWithPath: $0) }
+    func start(attempt: Int, onExit: @escaping @MainActor @Sendable (ClaudeCLIRefresher.Exit) -> Void) -> RefreshStart {
+        let cached = defaults.string(forKey: ClaudeCLILocator.cachedPathKey).map { URL(fileURLWithPath: $0) }
         let claude = ClaudeCLILocator.live.locate(cached: cached)
         if let claude {
-            UserDefaults.standard.set(claude.path, forKey: ClaudeCLILocator.cachedPathKey)
+            defaults.set(claude.path, forKey: ClaudeCLILocator.cachedPathKey)
         } else {
             findWithLoginShellInBackground()
         }
-        let strategy = RefreshStrategy.choose(attempt: attemptsThisOutage, claude: claude, loginShell: LoginShell.path)
+        let strategy = RefreshStrategy.choose(attempt: attempt, claude: claude, loginShell: LoginShell.path)
 
         do {
-            let pid = try launcher.launch(strategy.command()) { exit in
-                let note = exit.cliNotFound ? " (claude isn't on the login shell's PATH)" : ""
-                DiagnosticLog.shared.log(.refresh, "Process \(exit.pid) exited with code \(exit.status)\(note)")
-                guard activePID == exit.pid else { return }
-                activePID = nil
-                hasAttemptedReauth = false
-                onRefreshEnded?()
-            }
-            activePID = pid
-            DiagnosticLog.shared.log(.refresh, "Background claude process launched (PID \(pid), \(strategy.logDescription))")
-            return true
+            let pid = try launcher.launch(strategy.command(), onExit: onExit)
+            DiagnosticLog.shared.log(.refresh, "Background claude process launched (PID \(pid), attempt \(attempt), \(strategy.logDescription))")
+            return .started(pid: pid, strategy: strategy)
         } catch {
             DiagnosticLog.shared.log(.refresh, "Failed to launch claude process: \(error.localizedDescription)")
-            hasAttemptedReauth = false
-            return false
+            return .failed(error.localizedDescription)
         }
     }
 
     /// Caches the login shell's `claude` so the next refresh can launch it directly.
-    private static func findWithLoginShellInBackground() {
+    private func findWithLoginShellInBackground() {
         let shell = LoginShell.path
-        DispatchQueue.global(qos: .utility).async {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
             let found = ClaudeCLILocator.lookUpWithLoginShell(shell)
-            DispatchQueue.main.async {
-                if let found {
-                    UserDefaults.standard.set(found.path, forKey: ClaudeCLILocator.cachedPathKey)
-                    DiagnosticLog.shared.log(.refresh, "Login shell found claude at \(found.path)")
-                } else {
-                    DiagnosticLog.shared.log(.refresh, "Login shell couldn't find claude")
-                }
-            }
+            Task { @MainActor in self?.cacheLoginShellResult(found) }
+        }
+    }
+
+    private func cacheLoginShellResult(_ found: URL?) {
+        if let found {
+            defaults.set(found.path, forKey: ClaudeCLILocator.cachedPathKey)
+            DiagnosticLog.shared.log(.refresh, "Login shell found claude at \(found.path)")
+        } else {
+            DiagnosticLog.shared.log(.refresh, "Login shell couldn't find claude")
         }
     }
 }

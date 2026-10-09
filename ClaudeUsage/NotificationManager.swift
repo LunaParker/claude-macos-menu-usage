@@ -98,17 +98,8 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, Usa
         case openUsageSettings
     }
 
-    /// Invoked for ``Interaction/reauthenticate``. `UsageStore` wires this
-    /// to `manualRetry()` in `startPolling()` so the notification runs the
-    /// same path as the popover's "Try again" button: clear the credential
-    /// cache, reset the retry guards, re-read the Keychain, and only then
-    /// launch `claude` if the token is genuinely expired.
-    ///
-    /// The previous implementation called `CredentialRefresher` directly
-    /// from the delegate callback. That launched the CLI but never told
-    /// the store, so nothing re-read the Keychain until the next poll
-    /// tick — the notification appeared to do nothing, while clicking the
-    /// menu bar icon (which does re-read) worked immediately.
+    /// Invoked for ``Interaction/reauthenticate``. The app wires it to the store's
+    /// `manualRetry()`, which re-reads the Keychain after any refresh.
     var reauthenticateHandler: (() -> Void)?
 
     /// Maps a delivered notification's category and the action the user

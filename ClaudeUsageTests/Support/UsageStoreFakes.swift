@@ -48,6 +48,37 @@ final class FakeFetcher: UsageFetching {
     }
 }
 
+/// Records refresh launches; the test decides when and how each one exits.
+final class FakeRefresher: CredentialRefreshing {
+    struct Start {
+        let attempt: Int
+        let pid: Int32
+        let strategy: RefreshStrategy
+    }
+
+    var claudeInstalled = true
+    private(set) var starts: [Start] = []
+    private var onExit: (@MainActor @Sendable (ClaudeCLIRefresher.Exit) -> Void)?
+
+    func start(attempt: Int, onExit: @escaping @MainActor @Sendable (ClaudeCLIRefresher.Exit) -> Void) -> RefreshStart {
+        let claude = claudeInstalled ? URL(fileURLWithPath: "/fake/bin/claude") : nil
+        let start = Start(
+            attempt: attempt,
+            pid: Int32(1000 + starts.count),
+            strategy: RefreshStrategy.choose(attempt: attempt, claude: claude, loginShell: "/bin/zsh")
+        )
+        starts.append(start)
+        self.onExit = onExit
+        return .started(pid: start.pid, strategy: start.strategy)
+    }
+
+    /// Ends the most recent launch with `status`.
+    func exitLast(status: Int32 = 0) {
+        guard let last = starts.last else { return }
+        onExit?(ClaudeCLIRefresher.Exit(pid: last.pid, status: status, wasKilled: false))
+    }
+}
+
 final class FakeNotifier: UsageNotifying {
     private(set) var lost = 0
     private(set) var restored = 0
@@ -99,6 +130,7 @@ final class TestClock {
 final class StoreHarness {
     let keychain = FakeKeychain(.success(TestCredentials.valid(token: "token-1")))
     let fetcher = FakeFetcher()
+    let refresher = FakeRefresher()
     let notifier = FakeNotifier()
     let scheduler = ManualScheduler()
     let clock = TestClock()
@@ -109,6 +141,7 @@ final class StoreHarness {
         return UsageStore(dependencies: .init(
             credentials: keychain.source,
             fetcher: fetcher,
+            refresher: refresher,
             notifier: notifier,
             scheduler: scheduler,
             now: { clock.now },
