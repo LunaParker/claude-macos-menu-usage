@@ -128,7 +128,7 @@ struct UsageAPIClient {
     /// The undocumented endpoint that Claude Code itself calls for status-line data.
     /// This is not a public API and may change without notice.
     var endpoint: URL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
-    var session: URLSession = .shared
+    var http: HTTPClient = .shared
 
     func fetch(using credentials: ClaudeCredentials) async throws -> UsageResponse {
         if credentials.isExpired {
@@ -140,31 +140,29 @@ struct UsageAPIClient {
         request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("MenuBarUsageForClaude/1.0 (macOS menu bar)", forHTTPHeaderField: "User-Agent")
-        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.timeoutInterval = 20
 
         let data: Data
-        let response: URLResponse
+        let response: HTTPURLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            (data, response) = try await http.send(request)
         } catch {
-            throw UsageAPIError.transport(error)
+            switch error {
+            case .transport(let underlying): throw UsageAPIError.transport(underlying)
+            case .notHTTP: throw UsageAPIError.http(-1)
+            }
         }
 
-        guard let http = response as? HTTPURLResponse else {
-            throw UsageAPIError.http(-1)
-        }
-
-        switch http.statusCode {
+        switch response.statusCode {
         case 200:
             break
         case 401, 403:
             throw UsageAPIError.unauthorized
         case 429:
-            let retryAfter = Self.parseRetryAfter(http.value(forHTTPHeaderField: "Retry-After"))
+            let retryAfter = RetryAfter.parse(response.value(forHTTPHeaderField: "Retry-After"))
             throw UsageAPIError.rateLimited(retryAfter: retryAfter)
         default:
-            throw UsageAPIError.http(http.statusCode)
+            throw UsageAPIError.http(response.statusCode)
         }
 
         let decoder = JSONDecoder()
@@ -174,33 +172,6 @@ struct UsageAPIClient {
         } catch {
             throw UsageAPIError.decoding(error)
         }
-    }
-
-    /// Parses a `Retry-After` header value. Supports the integer-seconds form
-    /// (e.g. "120"); the HTTP-date form is rare in practice for 429 and we
-    /// fall back to a default backoff if we can't make sense of it.
-    ///
-    /// Returns `nil` (rather than zero) for any value strictly less than
-    /// one second — a `Retry-After: 0` header or an HTTP-date in the past
-    /// isn't a useful cooldown hint, so we'd rather fall back to the
-    /// store's default backoff than respect a zero.
-    static func parseRetryAfter(_ value: String?) -> TimeInterval? {
-        guard let value = value?.trimmingCharacters(in: .whitespaces), !value.isEmpty else {
-            return nil
-        }
-        if let seconds = TimeInterval(value), seconds >= 1 {
-            return seconds
-        }
-        // HTTP-date form: "Wed, 21 Oct 2026 07:28:00 GMT"
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "GMT")
-        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
-        if let date = formatter.date(from: value) {
-            let interval = date.timeIntervalSinceNow
-            return interval >= 1 ? interval : nil
-        }
-        return nil
     }
 }
 

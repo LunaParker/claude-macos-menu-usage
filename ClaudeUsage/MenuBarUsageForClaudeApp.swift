@@ -18,6 +18,10 @@ struct MenuBarUsageForClaudeApp: App {
         // be the only instance of ourselves in the menu bar.
         guard !LaunchContext.isUnitTestHost else { return }
         SingleInstance.enforceUniqueness()
+
+        // Older builds cached responses, bearer token included, on disk.
+        LegacyURLCache.removeForThisApp()
+        URLCache.shared = URLCache(memoryCapacity: 0, diskCapacity: 0)
     }
 
     var body: some Scene {

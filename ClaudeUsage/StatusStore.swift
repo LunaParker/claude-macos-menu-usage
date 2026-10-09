@@ -201,36 +201,33 @@ enum StatusAPIError: LocalizedError {
 
 struct StatusAPIClient {
     var endpoint: URL = URL(string: "https://status.claude.com/api/v2/summary.json")!
-    var session: URLSession = .shared
+    var http: HTTPClient = .shared
 
     func fetch() async throws -> StatusResponse {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "GET"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("MenuBarUsageForClaude/1.0 (macOS menu bar)", forHTTPHeaderField: "User-Agent")
-        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 10
 
         let data: Data
-        let response: URLResponse
+        let response: HTTPURLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            (data, response) = try await http.send(request)
         } catch {
-            throw StatusAPIError.transport(error)
+            switch error {
+            case .transport(let underlying): throw StatusAPIError.transport(underlying)
+            case .notHTTP: throw StatusAPIError.http(-1)
+            }
         }
 
-        guard let http = response as? HTTPURLResponse else {
-            throw StatusAPIError.http(-1)
-        }
-
-        switch http.statusCode {
+        switch response.statusCode {
         case 200:
             break
         case 429:
-            let retryAfter = Self.parseRetryAfter(http.value(forHTTPHeaderField: "Retry-After"))
+            let retryAfter = RetryAfter.parse(response.value(forHTTPHeaderField: "Retry-After"))
             throw StatusAPIError.rateLimited(retryAfter: retryAfter)
         default:
-            throw StatusAPIError.http(http.statusCode)
+            throw StatusAPIError.http(response.statusCode)
         }
 
         do {
@@ -238,28 +235,6 @@ struct StatusAPIClient {
         } catch {
             throw StatusAPIError.decoding(error)
         }
-    }
-
-    /// Mirrors `UsageAPIClient.parseRetryAfter` — supports the
-    /// integer-seconds form and the rare HTTP-date form, with anything
-    /// less than one second collapsed to nil so a stray `Retry-After: 0`
-    /// can't disable the cooldown.
-    private static func parseRetryAfter(_ value: String?) -> TimeInterval? {
-        guard let value = value?.trimmingCharacters(in: .whitespaces), !value.isEmpty else {
-            return nil
-        }
-        if let seconds = TimeInterval(value), seconds >= 1 {
-            return seconds
-        }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "GMT")
-        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
-        if let date = formatter.date(from: value) {
-            let interval = date.timeIntervalSinceNow
-            return interval >= 1 ? interval : nil
-        }
-        return nil
     }
 }
 
@@ -289,14 +264,9 @@ final class StatusStore {
     /// triggers within this window are no-ops.
     private let refreshTTL: TimeInterval = 300  // 5 minutes
 
-    /// Fallback backoff when a 429 response arrives without a parsable
-    /// `Retry-After`. Generous because Statuspage is a public CDN and
-    /// 429s are rare — when we do hit one, something unusual is happening.
-    private let defaultRateLimitBackoff: TimeInterval = 600  // 10 minutes
-
-    /// Floor on any 429 cooldown — protects against `Retry-After: 0`
-    /// headers that would otherwise effectively disable the cooldown.
-    private let minRateLimitBackoff: TimeInterval = 60
+    /// Statuspage is a public CDN and rarely sends 429s, so when one arrives
+    /// without a usable Retry-After the store stays quiet for ten minutes.
+    private let rateLimitPolicy = RateLimitPolicy(defaultBackoff: 600)
 
     /// Returns true when the global service-status feature toggle is on.
     /// Defaults to `true` until the user explicitly turns it off.
@@ -348,8 +318,7 @@ final class StatusStore {
             lastUpdated = snapshot.fetchedAt
             rateLimitedUntil = nil
         } catch StatusAPIError.rateLimited(let retryAfter) {
-            let suggested = retryAfter ?? defaultRateLimitBackoff
-            let backoff = max(suggested, minRateLimitBackoff)
+            let backoff = rateLimitPolicy.cooldown(retryAfter: retryAfter)
             DiagnosticLog.shared.log(.status, "HTTP 429 — backoff \(Int(backoff))s")
             rateLimitedUntil = Date().addingTimeInterval(backoff)
             if case .loaded = state { return }

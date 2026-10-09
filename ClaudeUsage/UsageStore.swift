@@ -105,16 +105,9 @@ final class UsageStore {
     /// show the existing snapshot instead of firing another request.
     private let popoverDebounceInterval: TimeInterval = 15
 
-    /// Fallback backoff when the server doesn't provide a `Retry-After`.
-    /// The `/api/oauth/usage` endpoint is known to return persistent 429s
-    /// (see anthropics/claude-code#31021), so we're generous here.
-    private let defaultRateLimitBackoff: TimeInterval = 300 // 5 minutes
-
-    /// Minimum cooldown we'll ever observe after a 429, regardless of what
-    /// the server suggests. Prevents a stray `Retry-After: 0` (or a past
-    /// HTTP-date) from effectively disabling the cooldown and letting the
-    /// background poll hammer the endpoint once per minute.
-    private let minRateLimitBackoff: TimeInterval = 60
+    /// The endpoint is known for persistent 429s (anthropics/claude-code#31021),
+    /// so a 429 without a usable Retry-After means five quiet minutes.
+    private let rateLimitPolicy = RateLimitPolicy(defaultBackoff: 300)
 
     /// Returns cached credentials when they're still valid, otherwise
     /// reads fresh credentials from the Keychain (which may trigger a
@@ -346,11 +339,7 @@ final class UsageStore {
             rateLimitedUntil = nil
             notificationManager.evaluateThresholds(snapshot: snapshot)
         } catch UsageAPIError.rateLimited(let retryAfter) {
-            // Respect the server's hint if it's sensible, but never drop
-            // below our own minimum — a `Retry-After: 0` header must not
-            // translate to "no cooldown".
-            let suggested = retryAfter ?? defaultRateLimitBackoff
-            let backoff = max(suggested, minRateLimitBackoff)
+            let backoff = rateLimitPolicy.cooldown(retryAfter: retryAfter)
             DiagnosticLog.shared.log(.api, "HTTP 429 — rate limited, backoff \(Int(backoff))s")
             rateLimitedUntil = Date().addingTimeInterval(backoff)
             // If we already had a good snapshot, keep it visible rather than
