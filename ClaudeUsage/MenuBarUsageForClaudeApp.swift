@@ -109,6 +109,17 @@ enum BrowserHelper {
     }
 }
 
+/// The unit tests run inside the app, so its launch code runs first. A test
+/// host launch must not quit other instances, open windows or start polling.
+enum LaunchContext {
+    static let isUnitTestHost = isUnitTestHost(environment: ProcessInfo.processInfo.environment)
+
+    nonisolated static func isUnitTestHost(environment: [String: String]) -> Bool {
+        ["XCTestConfigurationFilePath", "XCTestBundlePath", "XCTestSessionIdentifier"]
+            .contains { environment[$0] != nil }
+    }
+}
+
 /// Enforces at-most-one-instance semantics for the app. Menu bar apps with
 /// LSUIElement can end up with multiple live instances a few different ways:
 ///
@@ -226,6 +237,7 @@ struct MenuBarUsageForClaudeApp: App {
         // Runs on the main thread before any scenes are constructed, so
         // by the time the MenuBarExtra is rendered we're guaranteed to
         // be the only instance of ourselves in the menu bar.
+        guard !LaunchContext.isUnitTestHost else { return }
         SingleInstance.enforceUniqueness()
     }
 
@@ -299,6 +311,7 @@ private struct MenuBarLabel: View {
         // therefore don't touch the Keychain) until the user has seen the
         // onboarding window and clicked Continue.
         .task {
+            guard !LaunchContext.isUnitTestHost else { return }
             if hasCompletedOnboarding {
                 usage.startPolling()
             } else {
