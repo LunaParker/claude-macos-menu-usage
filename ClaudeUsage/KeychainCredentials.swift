@@ -372,9 +372,10 @@ enum CredentialRefresher {
         // dedup guard so the next poll cycle can retry with fresh
         // credentials. Without this, a fast-exiting `claude` would
         // leave hasAttemptedReauth stuck at `true` indefinitely.
+        let log = DiagnosticLog.shared
         process.terminationHandler = { terminatedProcess in
             let code = terminatedProcess.terminationStatus
-            DiagnosticLog.shared.post(.refresh, "Process exited with code \(code)")
+            log.post(.refresh, "Process exited with code \(code)")
             DispatchQueue.main.async {
                 if refreshProcess?.processIdentifier == terminatedProcess.processIdentifier {
                     refreshProcess = nil
@@ -421,11 +422,13 @@ enum CredentialRefresher {
     /// is still alive after the timeout, it's terminated and
     /// `hasAttemptedReauth` is cleared so the next poll cycle retries.
     private static func scheduleTimeout(for process: Process) {
+        let log = DiagnosticLog.shared
+        let timeout = processTimeout
         DispatchQueue.global(qos: .utility).asyncAfter(
-            deadline: .now() + processTimeout
+            deadline: .now() + timeout
         ) {
             guard process.isRunning else { return }
-            DiagnosticLog.shared.post(.refresh, "Process timed out after \(processTimeout)s, terminating")
+            log.post(.refresh, "Process timed out after \(timeout)s, terminating")
             process.terminate()
             DispatchQueue.main.async {
                 // Only clear if this is still the process we're tracking
