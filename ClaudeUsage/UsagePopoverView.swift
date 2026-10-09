@@ -443,8 +443,10 @@ private struct MissingCredentialsView: View {
                     Image(systemName: "1.circle.fill")
                         .foregroundStyle(.tint)
                 }
-                Text("curl -fsSL https://claude.ai/install.sh | bash")
+                // Verbatim, so the URL in the command isn't turned into a link.
+                Text(verbatim: "curl -fsSL https://claude.ai/install.sh | bash")
                     .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
                     .padding(6)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(.quinary, in: RoundedRectangle(cornerRadius: 6))
