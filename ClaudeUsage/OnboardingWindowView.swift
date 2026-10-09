@@ -4,12 +4,7 @@
 //
 //  The first-run welcome window. Shown before the app starts polling
 //  so the user understands what the app does before it begins fetching
-//  usage data.
-//
-//  This window is tied to `SettingsKeys.hasCompletedOnboarding`, whose
-//  value is scoped to the running bundle path — so rebuilding the app
-//  (which moves it to a new DerivedData path) or relocating the .app
-//  naturally re-shows this window.
+//  usage data. Continue sets `SettingsKeys.hasCompletedOnboarding`.
 //
 
 import AppKit
@@ -20,7 +15,7 @@ struct OnboardingWindowView: View {
     @Environment(\.dismissWindow) private var dismissWindow
 
     @AppStorage(SettingsKeys.hasCompletedOnboarding)
-    private var hasCompletedOnboarding: Bool = false
+    private var hasCompletedOnboarding: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {

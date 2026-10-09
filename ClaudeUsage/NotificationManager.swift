@@ -236,11 +236,11 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     // MARK: - Private helpers
 
-    private func checkThreshold(_ percent: Int, fraction: Double, key: String) {
+    private func checkThreshold(_ percent: Int, fraction: Double, key: SettingKey<Bool>) {
         let target = Double(percent) / 100.0
         guard fraction >= target,
               !firedThresholds.contains(percent),
-              UserDefaults.standard.bool(forKey: key) else { return }
+              UserDefaults.standard[key] else { return }
         // Only consume the threshold when delivery is possible. If
         // authorization hasn't been determined yet (startup race with
         // refreshAuthorizationStatus), the threshold stays unfired so
@@ -273,7 +273,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     }
 
     private func deliverResetNotificationIfEnabled() {
-        guard UserDefaults.standard.bool(forKey: SettingsKeys.notifyOnReset) else { return }
+        guard UserDefaults.standard[SettingsKeys.notifyOnReset] else { return }
         deliverNotification(
             title: "Claude Usage Reset",
             body: "Your session usage limit has reset. You're good to go!",

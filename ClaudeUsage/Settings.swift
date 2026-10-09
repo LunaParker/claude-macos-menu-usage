@@ -2,64 +2,78 @@
 //  Settings.swift
 //  Menu Bar Usage for Claude
 //
-//  Preference keys, window ids and the default poll interval.
+//  Preference keys with their defaults, launch-time preference migrations
+//  and window ids.
 //
 
-import CryptoKit
 import Foundation
+import SwiftUI
 
-/// Keys used with `@AppStorage` throughout the app. Kept here so the call
-/// sites in `MenuBarLabel`, the popover, and the settings pane all agree.
-enum SettingsKeys {
-    /// The onboarding flag is scoped to the running bundle's path. The
-    /// macOS Keychain access-control list is tied to the exact binary
-    /// path, so when Xcode rebuilds into a new DerivedData location (or
-    /// the user moves the .app to /Applications), the next run will get
-    /// a fresh Keychain prompt. Tying onboarding to the same path makes
-    /// the welcome window re-appear at that moment, which is what the
-    /// user sees as "why am I suddenly being asked for my keychain?"
-    static let hasCompletedOnboarding: String = {
-        let path = Bundle.main.bundlePath
-        let digest = SHA256.hash(data: Data(path.utf8))
-        let hex = digest.prefix(6).map { String(format: "%02x", $0) }.joined()
-        return "hasCompletedOnboarding_\(hex)"
-    }()
-    static let showSessionPercentInMenuBar = "showSessionPercentInMenuBar"
-    /// Polling interval in seconds. Validated by `UsageStore` against the
-    /// allowed range (120–300) — anything outside falls back to the default.
-    static let pollIntervalSeconds = "pollIntervalSeconds"
+/// A preference's UserDefaults key and the value it has until the user sets one.
+nonisolated struct SettingKey<Value: Sendable>: Sendable {
+    let name: String
+    let defaultValue: Value
+}
 
-    // Notification preferences
-    static let notifyAt50Percent = "notifyAt50Percent"
-    static let notifyAt75Percent = "notifyAt75Percent"
-    static let notifyAt90Percent = "notifyAt90Percent"
-    static let notifyOnReset = "notifyOnReset"
+/// Every preference the app stores. `@AppStorage` and direct reads both take
+/// these keys, so a default is written exactly once.
+nonisolated enum SettingsKeys {
+    static let hasCompletedOnboarding = SettingKey(name: "hasCompletedOnboarding", defaultValue: false)
+    static let showSessionPercentInMenuBar = SettingKey(name: "showSessionPercentInMenuBar", defaultValue: false)
+    /// Seconds between background polls. `UsageStore` falls back to the default
+    /// for anything outside 120–300.
+    static let pollIntervalSeconds = SettingKey(name: "pollIntervalSeconds", defaultValue: 300)
 
-    /// Bundle identifier of the user's preferred browser for opening web
-    /// links (e.g. "com.brave.Browser"). Empty string = system default.
-    static let preferredBrowserBundleID = "preferredBrowserBundleID"
+    static let notifyAt50Percent = SettingKey(name: "notifyAt50Percent", defaultValue: false)
+    static let notifyAt75Percent = SettingKey(name: "notifyAt75Percent", defaultValue: false)
+    static let notifyAt90Percent = SettingKey(name: "notifyAt90Percent", defaultValue: false)
+    static let notifyOnReset = SettingKey(name: "notifyOnReset", defaultValue: false)
 
-    // Service status (status.claude.com)
-    /// Master toggle for the popover's service-status row. When false,
-    /// `StatusStore` performs no fetches and the row is hidden.
-    static let serviceStatusEnabled = "serviceStatusEnabled"
-    /// When true, the status row is hidden whenever every monitored
-    /// component is operational. Doesn't affect fetching — we still need
-    /// to fetch in order to know whether anything is degraded.
-    static let serviceStatusHideWhenOperational = "serviceStatusHideWhenOperational"
-    /// Per-component monitoring opt-ins. Defaults defined on
-    /// `KnownComponent.defaultEnabled`; only `claude.ai` and `Claude Code`
-    /// are on out of the box.
-    static let monitorClaudeAI         = "monitorClaudeAI"
-    static let monitorClaudeCode       = "monitorClaudeCode"
-    static let monitorClaudeAPI        = "monitorClaudeAPI"
-    static let monitorClaudeConsole    = "monitorClaudeConsole"
-    static let monitorClaudeCowork     = "monitorClaudeCowork"
-    static let monitorClaudeForGov     = "monitorClaudeForGov"
-    /// Developer affordance — when true, the popover renders the status
-    /// row using a fabricated outage snapshot so the user can preview the
-    /// degraded look without waiting for a real incident.
-    static let simulateStatusOutage    = "simulateStatusOutage"
+    /// Bundle id of the browser for web links; empty means the system default.
+    static let preferredBrowserBundleID = SettingKey(name: "preferredBrowserBundleID", defaultValue: "")
+
+    /// Master switch for the popover's status.claude.com row.
+    static let serviceStatusEnabled = SettingKey(name: "serviceStatusEnabled", defaultValue: true)
+    /// Hides the status row while every monitored service is operational.
+    static let serviceStatusHideWhenOperational = SettingKey(name: "serviceStatusHideWhenOperational", defaultValue: false)
+    /// Developer tab: render the status row from a fabricated outage.
+    static let simulateStatusOutage = SettingKey(name: "simulateStatusOutage", defaultValue: false)
+}
+
+extension UserDefaults {
+    nonisolated subscript<Value>(key: SettingKey<Value>) -> Value {
+        object(forKey: key.name) as? Value ?? key.defaultValue
+    }
+}
+
+extension AppStorage {
+    init(_ key: SettingKey<Bool>, store: UserDefaults? = nil) where Value == Bool {
+        self.init(wrappedValue: key.defaultValue, key.name, store: store)
+    }
+
+    init(_ key: SettingKey<Int>, store: UserDefaults? = nil) where Value == Int {
+        self.init(wrappedValue: key.defaultValue, key.name, store: store)
+    }
+
+    init(_ key: SettingKey<String>, store: UserDefaults? = nil) where Value == String {
+        self.init(wrappedValue: key.defaultValue, key.name, store: store)
+    }
+}
+
+/// Rewrites preferences that older builds stored differently. Runs at launch,
+/// before any view reads a preference.
+nonisolated enum PreferenceMigrations {
+    static func run(on defaults: UserDefaults) {
+        // Onboarding was once scoped to the bundle path: hasCompletedOnboarding_<hash>.
+        let scoped = defaults.dictionaryRepresentation().keys.filter { $0.hasPrefix("hasCompletedOnboarding_") }
+        if scoped.contains(where: { defaults.bool(forKey: $0) }) {
+            defaults.set(true, forKey: SettingsKeys.hasCompletedOnboarding.name)
+        }
+        scoped.forEach(defaults.removeObject(forKey:))
+
+        // The Sonnet bar and its setting were removed when Sonnet stopped being a separate quota.
+        defaults.removeObject(forKey: "hideSonnetBarWhenZero")
+    }
 }
 
 /// The stable window id for the welcome/onboarding window opened at launch.
@@ -67,8 +81,3 @@ enum WindowIDs {
     static let onboarding = "onboarding"
     static let diagnosticLog = "diagnosticLog"
 }
-
-/// Default background poll interval, also used as the fallback when the
-/// user-chosen value is missing or out of range. Kept as a top-level
-/// constant so the store and the settings pane agree.
-let defaultPollIntervalSeconds: Int = 300

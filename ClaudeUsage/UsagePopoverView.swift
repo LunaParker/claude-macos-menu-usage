@@ -21,7 +21,7 @@ struct UsagePopoverView: View {
     /// real welcome flow lives in `OnboardingWindowView`, presented as a
     /// separate window at launch.
     @AppStorage(SettingsKeys.hasCompletedOnboarding)
-    private var hasCompletedOnboarding: Bool = false
+    private var hasCompletedOnboarding: Bool
 
     var body: some View {
         Group {
@@ -654,13 +654,13 @@ private struct ServiceStatusRow: View {
     @Environment(StatusStore.self) private var status
 
     @AppStorage(SettingsKeys.serviceStatusEnabled)
-    private var enabled: Bool = true
+    private var enabled: Bool
 
     @AppStorage(SettingsKeys.serviceStatusHideWhenOperational)
-    private var hideWhenOperational: Bool = false
+    private var hideWhenOperational: Bool
 
     @AppStorage(SettingsKeys.simulateStatusOutage)
-    private var simulateOutage: Bool = false
+    private var simulateOutage: Bool
 
     var body: some View {
         if let payload = effectivePayload {
@@ -675,7 +675,7 @@ private struct ServiceStatusRow: View {
             return (Self.simulatedSnapshot, true)
         }
         guard enabled else { return nil }
-        guard case .loaded(let snapshot) = status.state else { return nil }
+        guard let snapshot = status.snapshot else { return nil }
         if hideWhenOperational && snapshot.displaySeverity == .operational {
             return nil
         }

@@ -12,7 +12,7 @@ import Foundation
 
 /// A single utilisation window returned by `/api/oauth/usage`.
 /// `utilization` is a percentage (0…100) and may be nil if the window isn't
-/// applicable to this account (e.g. `seven_day_opus` for non-Max users).
+/// applicable to this account.
 struct UsageWindow: Decodable, Sendable {
     let utilization: Double?
     let resetsAt: Date?
@@ -77,14 +77,12 @@ struct LimitEntry: Decodable, Sendable {
 struct UsageResponse: Decodable, Sendable {
     let fiveHour: UsageWindow?
     let sevenDay: UsageWindow?
-    let sevenDayOpus: UsageWindow?
     let limits: [LimitEntry]?
     let extraUsage: ExtraUsageResponse?
 
     enum CodingKeys: String, CodingKey {
         case fiveHour = "five_hour"
         case sevenDay = "seven_day"
-        case sevenDayOpus = "seven_day_opus"
         case limits
         case extraUsage = "extra_usage"
     }

@@ -9,10 +9,10 @@
 import Foundation
 import Security
 
-/// The decoded OAuth blob written by Claude Code.
+/// The decoded OAuth blob written by Claude Code. The refresh token is left
+/// undecoded on purpose: the app never uses it, so it never holds it.
 struct ClaudeCredentials: Decodable, Sendable {
     let accessToken: String
-    let refreshToken: String
     /// Milliseconds since the Unix epoch.
     let expiresAt: Int64
     let scopes: [String]

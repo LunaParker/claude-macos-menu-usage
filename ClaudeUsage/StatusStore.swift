@@ -17,9 +17,9 @@ import Observation
 /// names are edited, so user preferences key off them rather than off the
 /// human-readable name.
 ///
-/// When Anthropic adds a new service to the status page, append a case
-/// here — `defaultEnabled` decides whether it's opt-in or opt-out.
-enum KnownComponent: String, CaseIterable, Identifiable, Sendable {
+/// When Anthropic adds a new service to the status page, append a case here
+/// and give it a display name and a preference key; Settings lists every case.
+nonisolated enum KnownComponent: String, CaseIterable, Identifiable, Sendable {
     case claudeAI       = "rwppv331jlwc"
     case claudeCode     = "yyzkbfz2thpt"
     case claudeAPI      = "k8w3r06qmzrp"
@@ -41,37 +41,21 @@ enum KnownComponent: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// UserDefaults key that stores whether the user is monitoring this
-    /// component. Read/written by `@AppStorage` in Settings and by
-    /// `StatusStore` when filtering the response.
-    var settingsKey: String {
+    /// Whether the user monitors this component. claude.ai and Claude Code
+    /// are on by default; everything else is opt-in.
+    var setting: SettingKey<Bool> {
         switch self {
-        case .claudeAI:      return SettingsKeys.monitorClaudeAI
-        case .claudeCode:    return SettingsKeys.monitorClaudeCode
-        case .claudeAPI:     return SettingsKeys.monitorClaudeAPI
-        case .claudeConsole: return SettingsKeys.monitorClaudeConsole
-        case .claudeCowork:  return SettingsKeys.monitorClaudeCowork
-        case .claudeForGov:  return SettingsKeys.monitorClaudeForGov
+        case .claudeAI:      return SettingKey(name: "monitorClaudeAI", defaultValue: true)
+        case .claudeCode:    return SettingKey(name: "monitorClaudeCode", defaultValue: true)
+        case .claudeAPI:     return SettingKey(name: "monitorClaudeAPI", defaultValue: false)
+        case .claudeConsole: return SettingKey(name: "monitorClaudeConsole", defaultValue: false)
+        case .claudeCowork:  return SettingKey(name: "monitorClaudeCowork", defaultValue: false)
+        case .claudeForGov:  return SettingKey(name: "monitorClaudeForGov", defaultValue: false)
         }
     }
 
-    /// Default monitoring state per component. claude.ai and Claude Code
-    /// are on by default — everything else is opt-in.
-    var defaultEnabled: Bool {
-        switch self {
-        case .claudeAI, .claudeCode: return true
-        default: return false
-        }
-    }
-
-    /// Returns the user's current monitoring choice, falling back to the
-    /// component's default when nothing's been written to UserDefaults yet.
-    static func isMonitored(_ component: KnownComponent) -> Bool {
-        let defaults = UserDefaults.standard
-        if defaults.object(forKey: component.settingsKey) == nil {
-            return component.defaultEnabled
-        }
-        return defaults.bool(forKey: component.settingsKey)
+    static func monitored(in defaults: UserDefaults) -> Set<KnownComponent> {
+        Set(allCases.filter { defaults[$0.setting] })
     }
 }
 
@@ -145,9 +129,8 @@ struct StatusResponse: Decodable, Sendable {
 
 // MARK: - Display snapshot
 
-/// The data the popover's status row renders. `StatusStore` builds one of
-/// these on every successful fetch, applying the user's monitored-components
-/// filter so the view layer doesn't have to.
+/// The data the popover's status row renders: a status response filtered to
+/// the components the user monitors.
 struct StatusSnapshot: Sendable {
     /// Worst severity across the user's monitored components.
     /// `.operational` when nothing they care about is degraded.
@@ -174,6 +157,34 @@ struct StatusSnapshot: Sendable {
         let id: String
         let name: String
         let url: URL?
+    }
+}
+
+extension StatusSnapshot {
+    init(response: StatusResponse, monitored: Set<KnownComponent>, fetchedAt: Date) {
+        let monitoredIDs = Set(monitored.map(\.rawValue))
+
+        let affected: [AffectedComponent] = response.components
+            .filter { monitoredIDs.contains($0.id) }
+            .map { AffectedComponent(id: $0.id, name: $0.name, severity: StatusSeverity.fromComponentStatus($0.status)) }
+            .filter { $0.severity != .operational }
+            .sorted { $0.severity > $1.severity }
+
+        // Incidents with no components attached are page-wide and always shown.
+        let incidents: [Incident] = response.incidents
+            .filter { incident in
+                guard let components = incident.components, !components.isEmpty else { return true }
+                return components.contains { monitoredIDs.contains($0.id) }
+            }
+            .map { Incident(id: $0.id, name: $0.name, url: $0.shortlink.flatMap { URL(string: $0) }) }
+
+        self.init(
+            displaySeverity: affected.map(\.severity).max() ?? .operational,
+            pageDescription: response.status.description,
+            affectedComponents: affected,
+            relevantIncidents: incidents,
+            fetchedAt: fetchedAt
+        )
     }
 }
 
@@ -240,16 +251,15 @@ struct StatusAPIClient {
 
 // MARK: - Observable store
 
-/// Owns the status snapshot rendered by `ServiceStatusRow`. Only fetches
-/// when the popover is opened and the cached snapshot is older than
-/// `refreshTTL`. No background polling, no notifications.
+/// Owns the status rendered by `ServiceStatusRow`. Only fetches when the
+/// popover opens and the last fetch is older than `refreshTTL`.
 @Observable
 @MainActor
 final class StatusStore {
     enum State {
         case idle
         case loading
-        case loaded(StatusSnapshot)
+        case loaded(StatusResponse, fetchedAt: Date)
         case error(String)
     }
 
@@ -257,8 +267,43 @@ final class StatusStore {
     private(set) var lastUpdated: Date?
     private(set) var rateLimitedUntil: Date?
 
-    private let client = StatusAPIClient()
+    /// The services the user monitors, kept in step with their toggles.
+    private(set) var monitored: Set<KnownComponent>
+
+    /// The latest status, filtered when read so a toggle applies without a refetch.
+    var snapshot: StatusSnapshot? {
+        guard case .loaded(let response, let fetchedAt) = state else { return nil }
+        return StatusSnapshot(response: response, monitored: monitored, fetchedAt: fetchedAt)
+    }
+
+    @ObservationIgnored private let client: StatusAPIClient
+    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private var defaultsObserver: (any NSObjectProtocol)?
     private var inFlight = false
+
+    init(client: StatusAPIClient = StatusAPIClient(), defaults: UserDefaults = .standard) {
+        self.client = client
+        self.defaults = defaults
+        monitored = KnownComponent.monitored(in: defaults)
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification, object: defaults, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reloadMonitored() }
+        }
+    }
+
+    isolated deinit {
+        if let defaultsObserver {
+            NotificationCenter.default.removeObserver(defaultsObserver)
+        }
+    }
+
+    private func reloadMonitored() {
+        let current = KnownComponent.monitored(in: defaults)
+        if current != monitored {
+            monitored = current
+        }
+    }
 
     /// How long a successful fetch is considered fresh. Popover-open
     /// triggers within this window are no-ops.
@@ -268,27 +313,12 @@ final class StatusStore {
     /// without a usable Retry-After the store stays quiet for ten minutes.
     private let rateLimitPolicy = RateLimitPolicy(defaultBackoff: 600)
 
-    /// Returns true when the global service-status feature toggle is on.
-    /// Defaults to `true` until the user explicitly turns it off.
-    private static func isFeatureEnabled() -> Bool {
-        let defaults = UserDefaults.standard
-        if defaults.object(forKey: SettingsKeys.serviceStatusEnabled) == nil {
-            return true
-        }
-        return defaults.bool(forKey: SettingsKeys.serviceStatusEnabled)
-    }
-
-    private static func anyComponentMonitored() -> Bool {
-        KnownComponent.allCases.contains(where: KnownComponent.isMonitored)
-    }
-
     /// Fetches the status summary if enough time has passed since the
     /// last successful fetch. No-op when the feature is off, no
     /// components are monitored, a fetch is already in flight, or the
     /// cached snapshot is still within `refreshTTL`.
     func refreshIfStale() async {
-        guard Self.isFeatureEnabled() else { return }
-        guard Self.anyComponentMonitored() else { return }
+        guard defaults[SettingsKeys.serviceStatusEnabled], !monitored.isEmpty else { return }
         if let lastUpdated, Date().timeIntervalSince(lastUpdated) < refreshTTL {
             return
         }
@@ -313,9 +343,9 @@ final class StatusStore {
         do {
             let response = try await client.fetch()
             DiagnosticLog.shared.log(.status, "HTTP 200 — page indicator: \(response.status.indicator)")
-            let snapshot = Self.buildSnapshot(from: response)
-            state = .loaded(snapshot)
-            lastUpdated = snapshot.fetchedAt
+            let fetchedAt = Date()
+            state = .loaded(response, fetchedAt: fetchedAt)
+            lastUpdated = fetchedAt
             rateLimitedUntil = nil
         } catch StatusAPIError.rateLimited(let retryAfter) {
             let backoff = rateLimitPolicy.cooldown(retryAfter: retryAfter)
@@ -330,53 +360,5 @@ final class StatusStore {
             DiagnosticLog.shared.log(.status, "Error: \(error.localizedDescription)")
             state = .error(error.localizedDescription)
         }
-    }
-
-    // MARK: Snapshot derivation
-
-    private static func buildSnapshot(from response: StatusResponse) -> StatusSnapshot {
-        let monitoredIDs = Set(
-            KnownComponent.allCases
-                .filter(KnownComponent.isMonitored)
-                .map(\.rawValue)
-        )
-
-        let affected: [StatusSnapshot.AffectedComponent] = response.components
-            .filter { monitoredIDs.contains($0.id) }
-            .map { component in
-                StatusSnapshot.AffectedComponent(
-                    id: component.id,
-                    name: component.name,
-                    severity: StatusSeverity.fromComponentStatus(component.status)
-                )
-            }
-            .filter { $0.severity != .operational }
-            .sorted { $0.severity > $1.severity }  // worst first
-
-        let displaySeverity = affected.map(\.severity).max() ?? .operational
-
-        let relevantIncidents: [StatusSnapshot.Incident] = response.incidents
-            .filter { incident in
-                // Page-wide incidents (no components attached) are always
-                // shown; component-tagged incidents only when they overlap
-                // the user's monitored set.
-                guard let comps = incident.components, !comps.isEmpty else { return true }
-                return comps.contains { monitoredIDs.contains($0.id) }
-            }
-            .map { incident in
-                StatusSnapshot.Incident(
-                    id: incident.id,
-                    name: incident.name,
-                    url: incident.shortlink.flatMap { URL(string: $0) }
-                )
-            }
-
-        return StatusSnapshot(
-            displaySeverity: displaySeverity,
-            pageDescription: response.status.description,
-            affectedComponents: affected,
-            relevantIncidents: relevantIncidents,
-            fetchedAt: Date()
-        )
     }
 }

@@ -265,7 +265,6 @@ struct BuildSnapshotTests {
         UsageResponse(
             fiveHour: fiveHour,
             sevenDay: sevenDay,
-            sevenDayOpus: nil,
             limits: limits,
             extraUsage: extraUsage
         )

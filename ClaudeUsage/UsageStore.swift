@@ -89,14 +89,9 @@ final class UsageStore {
     /// `/api/oauth/usage` is an undocumented endpoint with an aggressive
     /// rate limiter — see anthropics/claude-code#31021.
     private var pollInterval: Duration {
-        let stored = UserDefaults.standard.integer(forKey: SettingsKeys.pollIntervalSeconds)
-        let clamped: Int
-        if stored >= Self.minPollIntervalSeconds && stored <= Self.maxPollIntervalSeconds {
-            clamped = stored
-        } else {
-            clamped = defaultPollIntervalSeconds
-        }
-        return .seconds(clamped)
+        let stored = UserDefaults.standard[SettingsKeys.pollIntervalSeconds]
+        let allowed = Self.minPollIntervalSeconds...Self.maxPollIntervalSeconds
+        return .seconds(allowed.contains(stored) ? stored : SettingsKeys.pollIntervalSeconds.defaultValue)
     }
 
     /// Minimum time between successful fetches when the popover is opened.

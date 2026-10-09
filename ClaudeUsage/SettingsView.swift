@@ -40,38 +40,20 @@ struct SettingsView: View {
 
 private struct GeneralSettingsView: View {
     @AppStorage(SettingsKeys.showSessionPercentInMenuBar)
-    private var showSessionPercent: Bool = false
+    private var showSessionPercent: Bool
 
     @AppStorage(SettingsKeys.pollIntervalSeconds)
-    private var pollIntervalSeconds: Int = defaultPollIntervalSeconds
+    private var pollIntervalSeconds: Int
 
     @AppStorage(SettingsKeys.preferredBrowserBundleID)
-    private var preferredBrowserBundleID: String = ""
+    private var preferredBrowserBundleID: String
 
     // Service status preferences
     @AppStorage(SettingsKeys.serviceStatusEnabled)
-    private var serviceStatusEnabled: Bool = true
+    private var serviceStatusEnabled: Bool
 
     @AppStorage(SettingsKeys.serviceStatusHideWhenOperational)
-    private var serviceStatusHideWhenOperational: Bool = false
-
-    @AppStorage(SettingsKeys.monitorClaudeAI)
-    private var monitorClaudeAI: Bool = true
-
-    @AppStorage(SettingsKeys.monitorClaudeCode)
-    private var monitorClaudeCode: Bool = true
-
-    @AppStorage(SettingsKeys.monitorClaudeAPI)
-    private var monitorClaudeAPI: Bool = false
-
-    @AppStorage(SettingsKeys.monitorClaudeConsole)
-    private var monitorClaudeConsole: Bool = false
-
-    @AppStorage(SettingsKeys.monitorClaudeCowork)
-    private var monitorClaudeCowork: Bool = false
-
-    @AppStorage(SettingsKeys.monitorClaudeForGov)
-    private var monitorClaudeForGov: Bool = false
+    private var serviceStatusHideWhenOperational: Bool
 
     @Environment(UsageStore.self) private var usage
 
@@ -148,12 +130,9 @@ private struct GeneralSettingsView: View {
             }
 
             Section {
-                Toggle(KnownComponent.claudeAI.displayName,       isOn: $monitorClaudeAI)
-                Toggle(KnownComponent.claudeCode.displayName,     isOn: $monitorClaudeCode)
-                Toggle(KnownComponent.claudeAPI.displayName,      isOn: $monitorClaudeAPI)
-                Toggle(KnownComponent.claudeConsole.displayName,  isOn: $monitorClaudeConsole)
-                Toggle(KnownComponent.claudeCowork.displayName,   isOn: $monitorClaudeCowork)
-                Toggle(KnownComponent.claudeForGov.displayName,   isOn: $monitorClaudeForGov)
+                ForEach(KnownComponent.allCases) { component in
+                    MonitoredServiceToggle(component: component)
+                }
             } header: {
                 Text("Services to Monitor")
             } footer: {
@@ -257,15 +236,29 @@ private struct GeneralSettingsView: View {
     }
 }
 
+private struct MonitoredServiceToggle: View {
+    let component: KnownComponent
+    @AppStorage private var isOn: Bool
+
+    init(component: KnownComponent) {
+        self.component = component
+        _isOn = AppStorage(component.setting)
+    }
+
+    var body: some View {
+        Toggle(component.displayName, isOn: $isOn)
+    }
+}
+
 // MARK: - Notifications
 
 private struct NotificationsSettingsView: View {
     @Environment(UsageStore.self) private var usage
 
-    @AppStorage(SettingsKeys.notifyAt50Percent) private var notifyAt50 = false
-    @AppStorage(SettingsKeys.notifyAt75Percent) private var notifyAt75 = false
-    @AppStorage(SettingsKeys.notifyAt90Percent) private var notifyAt90 = false
-    @AppStorage(SettingsKeys.notifyOnReset) private var notifyOnReset = false
+    @AppStorage(SettingsKeys.notifyAt50Percent) private var notifyAt50: Bool
+    @AppStorage(SettingsKeys.notifyAt75Percent) private var notifyAt75: Bool
+    @AppStorage(SettingsKeys.notifyAt90Percent) private var notifyAt90: Bool
+    @AppStorage(SettingsKeys.notifyOnReset) private var notifyOnReset: Bool
 
     var body: some View {
         Form {
@@ -391,7 +384,7 @@ private struct DeveloperSettingsView: View {
     @State private var showingResetConfirmation: Bool = false
 
     @AppStorage(SettingsKeys.simulateStatusOutage)
-    private var simulateStatusOutage: Bool = false
+    private var simulateStatusOutage: Bool
 
     var body: some View {
         Form {

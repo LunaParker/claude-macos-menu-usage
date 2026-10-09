@@ -18,6 +18,7 @@ struct MenuBarUsageForClaudeApp: App {
         // be the only instance of ourselves in the menu bar.
         guard !LaunchContext.isUnitTestHost else { return }
         SingleInstance.enforceUniqueness()
+        PreferenceMigrations.run(on: .standard)
 
         // Older builds cached responses, bearer token included, on disk.
         LegacyURLCache.removeForThisApp()

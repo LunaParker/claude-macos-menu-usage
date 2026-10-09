@@ -13,10 +13,10 @@ struct MenuBarLabel: View {
     let usage: UsageStore
 
     @AppStorage(SettingsKeys.showSessionPercentInMenuBar)
-    private var showSessionPercent: Bool = false
+    private var showSessionPercent: Bool
 
     @AppStorage(SettingsKeys.hasCompletedOnboarding)
-    private var hasCompletedOnboarding: Bool = false
+    private var hasCompletedOnboarding: Bool
 
     @Environment(\.openWindow) private var openWindow
 

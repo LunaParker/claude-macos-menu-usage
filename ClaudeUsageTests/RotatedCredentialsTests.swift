@@ -53,7 +53,6 @@ struct RotatedCredentialsTests {
 private func makeCredentials(accessToken: String, expiresInSeconds: TimeInterval) -> ClaudeCredentials {
     ClaudeCredentials(
         accessToken: accessToken,
-        refreshToken: "refresh",
         expiresAt: Int64((Date().timeIntervalSince1970 + expiresInSeconds) * 1000),
         scopes: [],
         subscriptionType: nil,

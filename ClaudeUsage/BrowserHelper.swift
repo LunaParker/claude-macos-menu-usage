@@ -36,7 +36,7 @@ enum BrowserHelper {
     /// Opens `url` in the preferred browser, falling back to the system
     /// default if no preference is set or the chosen browser can't be found.
     static func open(_ url: URL) {
-        let bundleID = UserDefaults.standard.string(forKey: SettingsKeys.preferredBrowserBundleID) ?? ""
+        let bundleID = UserDefaults.standard[SettingsKeys.preferredBrowserBundleID]
         if !bundleID.isEmpty,
            let browserURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
             NSWorkspace.shared.open([url], withApplicationAt: browserURL, configuration: NSWorkspace.OpenConfiguration())
