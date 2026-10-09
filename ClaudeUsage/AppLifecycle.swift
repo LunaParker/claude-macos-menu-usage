@@ -11,7 +11,7 @@ import ServiceManagement
 
 /// The unit tests run inside the app, so its launch code runs first. A test
 /// host launch must not quit other instances, open windows or start polling.
-enum LaunchContext {
+nonisolated enum LaunchContext {
     static let isUnitTestHost = isUnitTestHost(environment: ProcessInfo.processInfo.environment)
 
     nonisolated static func isUnitTestHost(environment: [String: String]) -> Bool {

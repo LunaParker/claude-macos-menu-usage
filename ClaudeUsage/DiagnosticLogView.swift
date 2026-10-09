@@ -38,9 +38,10 @@ struct DiagnosticLogView: View {
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
 
-            Button("Clear") { log.clear() }
+            Button("Clear Window") { log.clear() }
                 .buttonStyle(.borderless)
                 .font(.caption)
+                .help("Empties this window. The log file keeps every entry.")
 
             Button("Reveal Log File") { log.revealInFinder() }
                 .buttonStyle(.borderless)
@@ -69,7 +70,8 @@ struct DiagnosticLogView: View {
                 }
                 .id(entry.id)
             }
-            .onChange(of: log.entries.count) { _, _ in
+            // Not entries.count: it stays at the cap once the list is full.
+            .onChange(of: log.entries.last?.id) { _, _ in
                 if let last = filteredEntries.last {
                     withAnimation {
                         proxy.scrollTo(last.id, anchor: .bottom)

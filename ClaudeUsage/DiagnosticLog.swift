@@ -2,35 +2,32 @@
 //  DiagnosticLog.swift
 //  Menu Bar Usage for Claude
 //
-//  In-memory diagnostic log for Keychain reads, API requests, and
-//  background credential refresh events. Accessible from both SwiftUI
-//  views (@MainActor) and static utility enums (background threads).
-//
-//  Entries are also appended to a persistent log file at
-//  ~/Library/Logs/ClaudeUsage/diagnostic.log so they survive across
-//  app launches and can be shared for debugging.
+//  Timestamped log of Keychain reads, API requests and background credential
+//  refreshes. Each entry goes to the unified log (subsystem
+//  com.shyowlstudios.ClaudeUsage), to ~/Library/Logs/ClaudeUsage/diagnostic.log
+//  and to the list the Diagnostic Log window shows.
 //
 
 import AppKit
 import Foundation
 import Observation
+import OSLog
+import Synchronization
 
 @Observable
 @MainActor
 final class DiagnosticLog {
-    /// Shared instance used app-wide. `CredentialRefresher` (a static
-    /// enum whose termination handler fires on a background thread)
-    /// uses this directly; SwiftUI views receive it through
-    /// `@Environment`.
-    static let shared = DiagnosticLog()
+    nonisolated static let shared = DiagnosticLog(logFileURL: defaultLogFileURL)
 
-    struct Entry: Identifiable {
+    nonisolated static let subsystem = "com.shyowlstudios.ClaudeUsage"
+
+    nonisolated struct Entry: Identifiable, Sendable {
         let id = UUID()
         let timestamp: Date
         let category: Category
         let message: String
 
-        enum Category: String, CaseIterable {
+        nonisolated enum Category: String, CaseIterable, Sendable {
             case keychain = "Keychain"
             case api = "API"
             case refresh = "Refresh"
@@ -38,105 +35,119 @@ final class DiagnosticLog {
         }
     }
 
+    /// The most recent entries, oldest first.
     private(set) var entries: [Entry] = []
 
-    /// Maximum entries kept in memory. At ~4 entries per 5-minute poll
-    /// cycle, 500 entries covers roughly 10 hours of history.
     private let maxEntries = 500
 
-    /// URL of the persistent log file.
-    let logFileURL: URL
+    @ObservationIgnored nonisolated let logFileURL: URL
+    @ObservationIgnored private nonisolated let sink: LogSink
 
-    /// File handle kept open for appending.
-    private var fileHandle: FileHandle?
+    nonisolated private static let loggers = Dictionary(uniqueKeysWithValues: Entry.Category.allCases.map {
+        ($0, Logger(subsystem: subsystem, category: $0.rawValue))
+    })
 
-    /// Maximum log file size before truncation on launch.
-    private let maxFileSize: Int = 512 * 1024 // 512 KB
-
-    /// Target size after truncation (keeps the most recent entries).
-    private let truncateTarget: Int = 256 * 1024 // 256 KB
-
-    private static let fileDateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        return f
-    }()
-
-    init() {
-        let logsDir = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Logs")
-            .appendingPathComponent("ClaudeUsage")
-        logFileURL = logsDir.appendingPathComponent("diagnostic.log")
-
-        try? FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
-        truncateIfNeeded()
-
-        if !FileManager.default.fileExists(atPath: logFileURL.path) {
-            FileManager.default.createFile(atPath: logFileURL.path, contents: nil)
+    /// A unit-test host logs to a scratch file so test runs never touch the real log.
+    nonisolated private static var defaultLogFileURL: URL {
+        if LaunchContext.isUnitTestHost {
+            return FileManager.default.temporaryDirectory.appendingPathComponent("ClaudeUsageTests-diagnostic.log")
         }
-        fileHandle = try? FileHandle(forWritingTo: logFileURL)
-        fileHandle?.seekToEndOfFile()
+        return FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Logs/ClaudeUsage/diagnostic.log")
     }
 
-    /// Appends an entry on the main actor.
-    func log(_ category: Entry.Category, _ message: String) {
+    nonisolated init(logFileURL: URL) {
+        self.logFileURL = logFileURL
+        sink = LogSink(fileURL: logFileURL)
+    }
+
+    /// Records an entry, stamped now. Safe to call from any thread.
+    nonisolated func log(_ category: Entry.Category, _ message: String) {
         let entry = Entry(timestamp: Date(), category: category, message: message)
-        entries.append(entry)
+        Self.loggers[category]?.log("\(message, privacy: .public)")
+        sink.write(entry)
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { self.append(entry) }
+        }
+    }
+
+    /// Entries logged on other threads can arrive out of order, so insert by time.
+    func append(_ entry: Entry) {
+        let index = entries.lastIndex { $0.timestamp <= entry.timestamp }.map { $0 + 1 } ?? 0
+        entries.insert(entry, at: index)
         if entries.count > maxEntries {
             entries.removeFirst(entries.count - maxEntries)
         }
-        writeToFile(entry)
     }
 
+    /// Empties the window's list. The log file keeps every entry.
     func clear() {
         entries.removeAll()
     }
 
-    /// Thread-safe trampoline for callers off the main actor (e.g.
-    /// `CredentialRefresher`'s process termination handler).
-    nonisolated func post(_ category: Entry.Category, _ message: String) {
-        DispatchQueue.main.async {
-            MainActor.assumeIsolated {
-                self.log(category, message)
-            }
-        }
-    }
-
-    /// Opens the log file's parent folder in Finder with the file selected.
     func revealInFinder() {
         NSWorkspace.shared.selectFile(logFileURL.path, inFileViewerRootedAtPath: "")
     }
+}
 
-    // MARK: - File logging
-
-    private func writeToFile(_ entry: Entry) {
-        let timestamp = Self.fileDateFormatter.string(from: entry.timestamp)
-        let line = "\(timestamp) [\(entry.category.rawValue)] \(entry.message)\n"
-        guard let data = line.data(using: .utf8) else { return }
-        fileHandle?.write(data)
+/// Appends entries to the log file, trimming it to its most recent lines
+/// whenever it passes `maxFileSize`.
+nonisolated final class LogSink: Sendable {
+    private struct State {
+        var handle: FileHandle?
     }
 
-    /// If the log file exceeds `maxFileSize`, keep only the last
-    /// `truncateTarget` bytes (starting at a line boundary).
-    private func truncateIfNeeded() {
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: logFileURL.path),
-              let size = attrs[.size] as? Int,
-              size > maxFileSize
-        else { return }
+    private let fileURL: URL
+    private let maxFileSize: UInt64
+    private let trimTarget: Int
+    private let state: Mutex<State>
 
-        guard let data = try? Data(contentsOf: logFileURL),
-              data.count > truncateTarget
-        else { return }
-
-        let keepFrom = data.count - truncateTarget
-        var kept = data[keepFrom...]
-
-        // Advance to the first newline so we start on a complete line.
-        if let nl = kept.firstIndex(of: UInt8(ascii: "\n")) {
-            kept = kept[(nl + 1)...]
+    init(fileURL: URL, maxFileSize: UInt64 = 512 * 1024, trimTarget: Int = 256 * 1024) {
+        self.fileURL = fileURL
+        self.maxFileSize = maxFileSize
+        self.trimTarget = trimTarget
+        try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let size = (try? FileManager.default.attributesOfItem(atPath: fileURL.path))?[.size] as? UInt64, size > maxFileSize {
+            Self.trim(fileURL, keeping: trimTarget)
         }
+        state = Mutex(State(handle: Self.openForAppending(fileURL)))
+    }
 
-        try? Data(kept).write(to: logFileURL)
+    static func line(for entry: DiagnosticLog.Entry, timeZone: TimeZone = .current) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+        return "\(formatter.string(from: entry.timestamp)) [\(entry.category.rawValue)] \(entry.message)\n"
+    }
+
+    func write(_ entry: DiagnosticLog.Entry) {
+        let data = Data(Self.line(for: entry).utf8)
+        state.withLock { state in
+            try? state.handle?.write(contentsOf: data)
+            guard let size = try? state.handle?.offset(), size > maxFileSize else { return }
+            try? state.handle?.close()
+            Self.trim(fileURL, keeping: trimTarget)
+            state.handle = Self.openForAppending(fileURL)
+        }
+    }
+
+    private static func openForAppending(_ url: URL) -> FileHandle? {
+        if !FileManager.default.fileExists(atPath: url.path) {
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+        }
+        let handle = try? FileHandle(forWritingTo: url)
+        _ = try? handle?.seekToEnd()
+        return handle
+    }
+
+    /// Keeps the last `target` bytes, starting at a line boundary.
+    private static func trim(_ url: URL, keeping target: Int) {
+        guard let data = try? Data(contentsOf: url), data.count > target else { return }
+        var kept = data[(data.count - target)...]
+        if let newline = kept.firstIndex(of: UInt8(ascii: "\n")) {
+            kept = kept[(newline + 1)...]
+        }
+        try? Data(kept).write(to: url)
     }
 }

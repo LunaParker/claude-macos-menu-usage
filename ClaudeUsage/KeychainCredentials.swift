@@ -98,13 +98,13 @@ enum KeychainCredentialStore {
         // Primary: /usr/bin/security (silent, no Keychain prompt).
         // Pass 1: account-specific (post-refresh credential).
         if let creds = try? loadViaSecurityCLI(account: NSUserName()) {
-            DiagnosticLog.shared.post(.keychain, "Keychain read succeeded via security CLI (account: \(NSUserName()))")
+            DiagnosticLog.shared.log(.keychain, "Keychain read succeeded via security CLI (account: \(NSUserName()))")
             lastReadMethod = .securityCLI
             return logExpiry(creds)
         }
         // Pass 2: no account filter (initial-login credential).
         if let creds = try? loadViaSecurityCLI(account: nil) {
-            DiagnosticLog.shared.post(.keychain, "Keychain read succeeded via security CLI (no account filter)")
+            DiagnosticLog.shared.log(.keychain, "Keychain read succeeded via security CLI (no account filter)")
             lastReadMethod = .securityCLI
             return logExpiry(creds)
         }
@@ -113,7 +113,7 @@ enum KeychainCredentialStore {
         // Keychain access prompt, but ensures the app still works if
         // Claude Code changes how it writes credentials or if
         // /usr/bin/security is no longer on the item's ACL.
-        DiagnosticLog.shared.post(.keychain, "security CLI failed, falling back to SecItemCopyMatching")
+        DiagnosticLog.shared.log(.keychain, "security CLI failed, falling back to SecItemCopyMatching")
         do {
             let creds = try loadViaSecItemCopyMatching()
             lastReadMethod = .secItemCopyMatching
@@ -125,10 +125,10 @@ enum KeychainCredentialStore {
             do {
                 creds = try loadFromCredentialsFile()
             } catch {
-                DiagnosticLog.shared.post(.keychain, "No usable credentials in ~/.claude/.credentials.json either")
+                DiagnosticLog.shared.log(.keychain, "No usable credentials in ~/.claude/.credentials.json either")
                 throw error
             }
-            DiagnosticLog.shared.post(.keychain, "Read succeeded via ~/.claude/.credentials.json (Claude Code's plaintext fallback)")
+            DiagnosticLog.shared.log(.keychain, "Read succeeded via ~/.claude/.credentials.json (Claude Code's plaintext fallback)")
             lastReadMethod = .credentialsFile
             return logExpiry(creds)
         }
@@ -141,7 +141,7 @@ enum KeychainCredentialStore {
         let relative = creds.isExpired
             ? "expired \(formatter.localizedString(for: creds.expirationDate, relativeTo: Date()))"
             : "expires \(formatter.localizedString(for: creds.expirationDate, relativeTo: Date()))"
-        DiagnosticLog.shared.post(.keychain, "Token \(relative)")
+        DiagnosticLog.shared.log(.keychain, "Token \(relative)")
         return creds
     }
 
@@ -161,20 +161,20 @@ enum KeychainCredentialStore {
 
         switch status {
         case errSecSuccess:
-            DiagnosticLog.shared.post(.keychain, "SecItemCopyMatching succeeded")
+            DiagnosticLog.shared.log(.keychain, "SecItemCopyMatching succeeded")
         case errSecItemNotFound:
-            DiagnosticLog.shared.post(.keychain, "SecItemCopyMatching: item not found")
+            DiagnosticLog.shared.log(.keychain, "SecItemCopyMatching: item not found")
             throw KeychainError.itemNotFound
         case errSecAuthFailed, errSecUserCanceled, errSecInteractionNotAllowed:
-            DiagnosticLog.shared.post(.keychain, "SecItemCopyMatching: access denied (OSStatus \(status))")
+            DiagnosticLog.shared.log(.keychain, "SecItemCopyMatching: access denied (OSStatus \(status))")
             throw KeychainError.accessDenied(status)
         default:
-            DiagnosticLog.shared.post(.keychain, "SecItemCopyMatching: unexpected status \(status)")
+            DiagnosticLog.shared.log(.keychain, "SecItemCopyMatching: unexpected status \(status)")
             throw KeychainError.unexpectedStatus(status)
         }
 
         guard let data = item as? Data else {
-            DiagnosticLog.shared.post(.keychain, "SecItemCopyMatching: data is not Data")
+            DiagnosticLog.shared.log(.keychain, "SecItemCopyMatching: data is not Data")
             throw KeychainError.malformedPayload(nil)
         }
 
@@ -182,7 +182,7 @@ enum KeychainCredentialStore {
             let envelope = try JSONDecoder().decode(CredentialsEnvelope.self, from: data)
             return logExpiry(envelope.claudeAiOauth)
         } catch {
-            DiagnosticLog.shared.post(.keychain, "SecItemCopyMatching: failed to decode payload")
+            DiagnosticLog.shared.log(.keychain, "SecItemCopyMatching: failed to decode payload")
             throw KeychainError.malformedPayload(error)
         }
     }
@@ -232,7 +232,7 @@ enum KeychainCredentialStore {
         do {
             try process.run()
         } catch {
-            DiagnosticLog.shared.post(.keychain, "security CLI (\(pass)) failed to launch: \(error.localizedDescription)")
+            DiagnosticLog.shared.log(.keychain, "security CLI (\(pass)) failed to launch: \(error.localizedDescription)")
             throw KeychainError.unexpectedStatus(-1)
         }
 
@@ -248,7 +248,7 @@ enum KeychainCredentialStore {
             let reason = String(decoding: errorOutput, as: UTF8.self)
                 .replacingOccurrences(of: "security: ", with: "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            DiagnosticLog.shared.post(.keychain, "security CLI (\(pass)) exited \(process.terminationStatus): \(reason.isEmpty ? "no error output" : reason)")
+            DiagnosticLog.shared.log(.keychain, "security CLI (\(pass)) exited \(process.terminationStatus): \(reason.isEmpty ? "no error output" : reason)")
             throw KeychainError.itemNotFound
         }
 
@@ -260,7 +260,7 @@ enum KeychainCredentialStore {
             let envelope = try JSONDecoder().decode(CredentialsEnvelope.self, from: data)
             return envelope.claudeAiOauth
         } catch {
-            DiagnosticLog.shared.post(.keychain, "Failed to decode Keychain payload")
+            DiagnosticLog.shared.log(.keychain, "Failed to decode Keychain payload")
             throw KeychainError.malformedPayload(error)
         }
     }
@@ -296,7 +296,7 @@ enum CredentialRefresher {
     /// credentials are valid. Re-arms the reauth trigger and detaches
     /// any lingering background process, leaving it to finish on its own.
     static func credentialsBecameValid() {
-        DiagnosticLog.shared.post(.refresh, "Credentials validated, clearing refresh state")
+        DiagnosticLog.shared.log(.refresh, "Credentials validated, clearing refresh state")
         hasAttemptedReauth = false
         detachProcess()
         onRefreshEnded?()
@@ -351,7 +351,7 @@ enum CredentialRefresher {
     @discardableResult
     static func refreshInBackground() -> Bool {
         guard !hasAttemptedReauth else {
-            DiagnosticLog.shared.post(.refresh, "Skipped: refresh already attempted")
+            DiagnosticLog.shared.log(.refresh, "Skipped: refresh already attempted")
             return false
         }
         hasAttemptedReauth = true
@@ -375,7 +375,7 @@ enum CredentialRefresher {
         let log = DiagnosticLog.shared
         process.terminationHandler = { terminatedProcess in
             let code = terminatedProcess.terminationStatus
-            log.post(.refresh, "Process exited with code \(code)")
+            log.log(.refresh, "Process exited with code \(code)")
             DispatchQueue.main.async {
                 if refreshProcess?.processIdentifier == terminatedProcess.processIdentifier {
                     refreshProcess = nil
@@ -388,11 +388,11 @@ enum CredentialRefresher {
         do {
             try process.run()
             refreshProcess = process
-            DiagnosticLog.shared.post(.refresh, "Background claude process launched (PID \(process.processIdentifier))")
+            DiagnosticLog.shared.log(.refresh, "Background claude process launched (PID \(process.processIdentifier))")
             scheduleTimeout(for: process)
             return true
         } catch {
-            DiagnosticLog.shared.post(.refresh, "Failed to launch claude process: \(error)")
+            DiagnosticLog.shared.log(.refresh, "Failed to launch claude process: \(error)")
             return false
         }
     }
@@ -428,7 +428,7 @@ enum CredentialRefresher {
             deadline: .now() + timeout
         ) {
             guard process.isRunning else { return }
-            log.post(.refresh, "Process timed out after \(timeout)s, terminating")
+            log.log(.refresh, "Process timed out after \(timeout)s, terminating")
             process.terminate()
             DispatchQueue.main.async {
                 // Only clear if this is still the process we're tracking
