@@ -32,6 +32,7 @@ final class DiagnosticLog {
             case api = "API"
             case refresh = "Refresh"
             case status = "Status"
+            case power = "Power"
         }
     }
 

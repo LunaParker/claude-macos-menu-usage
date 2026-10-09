@@ -29,7 +29,7 @@ struct DiagnosticLogView: View {
                 }
             }
             .pickerStyle(.segmented)
-            .frame(maxWidth: 300)
+            .frame(maxWidth: 380)
 
             Spacer()
 
@@ -92,6 +92,7 @@ struct DiagnosticLogView: View {
         case .api: .blue
         case .refresh: .purple
         case .status: .teal
+        case .power: .indigo
         }
     }
 }

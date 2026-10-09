@@ -20,6 +20,7 @@ final class UsageStore {
         var refresher: any CredentialRefreshing
         var notifier: any UsageNotifying
         var scheduler: any Scheduler
+        var display: any DisplayState
         var now: () -> Date
         var defaults: UserDefaults
 
@@ -30,6 +31,7 @@ final class UsageStore {
                 refresher: ClaudeRefreshService(),
                 notifier: notifier,
                 scheduler: LiveScheduler(),
+                display: DisplaySleepMonitor(),
                 now: Date.init,
                 defaults: .standard
             )
@@ -46,6 +48,8 @@ final class UsageStore {
         case retry
         /// A background `claude` refresh just exited.
         case postRefresh
+        /// The displays woke; debounced like `.popover`.
+        case wake
     }
 
     /// The latest usage. Kept through transient failures; `failure` says why it may be stale.
@@ -89,6 +93,7 @@ final class UsageStore {
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var retryWork: ScheduledWork?
     @ObservationIgnored private var authWork: ScheduledWork?
+    @ObservationIgnored private var wakeWork: ScheduledWork?
     @ObservationIgnored private var consecutiveTransientFailures = 0
 
     /// A post-refresh check or manual retry that arrived mid-refresh runs once that ends.
@@ -102,8 +107,8 @@ final class UsageStore {
     /// limiter starts to bite (anthropics/claude-code#31021).
     private static let pollIntervalRange = 120...300
 
-    /// Popover opens within this long of a success show the existing snapshot.
-    private let popoverDebounceInterval: TimeInterval = 15
+    /// Popover opens and wakes within this long of a success show the existing snapshot.
+    private let popoverDebounceInterval: TimeInterval = 60
 
     /// The endpoint is known for persistent 429s (anthropics/claude-code#31021),
     /// so a 429 without a usable Retry-After means five quiet minutes.
@@ -112,6 +117,7 @@ final class UsageStore {
     init(dependencies: Dependencies) {
         self.dependencies = dependencies
         diagnosticsStartedAt = dependencies.now()
+        dependencies.display.onWake = { [weak self] in self?.displaysWoke() }
     }
 
     /// Read on every tick, so a change in Settings applies to the next sleep.
@@ -169,6 +175,16 @@ final class UsageStore {
         await refresh(trigger: .manual)
     }
 
+    /// Fetches shortly after the displays wake, giving the network a moment to
+    /// come back. Nothing is read before onboarding has finished.
+    func displaysWoke() {
+        guard dependencies.defaults[SettingsKeys.hasCompletedOnboarding] else { return }
+        wakeWork?.cancel()
+        wakeWork = dependencies.scheduler.schedule(after: .seconds(5)) { [weak self] in
+            await self?.refresh(trigger: .wake)
+        }
+    }
+
     /// Wipes the diagnostic counters so the request rate can be measured afresh.
     func resetDiagnostics() {
         networkRequestCount = 0
@@ -201,8 +217,14 @@ final class UsageStore {
             }
             return
         }
+        // Nobody sees a refresh while the displays sleep, and a `claude` launched
+        // into a DarkWake freezes mid-refresh when the Mac sleeps again.
+        if trigger != .manual, dependencies.display.displaysAsleep {
+            return
+        }
         let now = dependencies.now()
-        if trigger == .popover, let lastUpdated, now.timeIntervalSince(lastUpdated) < popoverDebounceInterval {
+        if trigger == .popover || trigger == .wake,
+           let lastUpdated, now.timeIntervalSince(lastUpdated) < popoverDebounceInterval {
             return
         }
         if let rateLimitedUntil, now < rateLimitedUntil {

@@ -79,6 +79,18 @@ final class FakeRefresher: CredentialRefreshing {
     }
 }
 
+final class FakeDisplay: DisplayState {
+    var displaysAsleep = false
+    var onWake: (() -> Void)?
+
+    func sleep() { displaysAsleep = true }
+
+    func wake() {
+        displaysAsleep = false
+        onWake?()
+    }
+}
+
 final class FakeNotifier: UsageNotifying {
     private(set) var lost = 0
     private(set) var restored = 0
@@ -133,8 +145,13 @@ final class StoreHarness {
     let refresher = FakeRefresher()
     let notifier = FakeNotifier()
     let scheduler = ManualScheduler()
+    let display = FakeDisplay()
     let clock = TestClock()
-    let defaults = TestDefaults.make()
+    let defaults: UserDefaults = {
+        let defaults = TestDefaults.make()
+        defaults.set(true, forKey: SettingsKeys.hasCompletedOnboarding.name)
+        return defaults
+    }()
 
     func makeStore() -> UsageStore {
         let clock = self.clock
@@ -144,6 +161,7 @@ final class StoreHarness {
             refresher: refresher,
             notifier: notifier,
             scheduler: scheduler,
+            display: display,
             now: { clock.now },
             defaults: defaults
         ))
