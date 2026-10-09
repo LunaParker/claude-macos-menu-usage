@@ -9,7 +9,6 @@
 //  diagnostic counters.
 //
 
-import Combine
 import ServiceManagement
 import SwiftUI
 import UserNotifications
@@ -375,12 +374,6 @@ private struct DeveloperSettingsView: View {
     @Environment(NotificationManager.self) private var notifications
     @Environment(\.openWindow) private var openWindow
 
-    /// Drives relative-date labels to re-render once a second while the
-    /// tab is visible so "Updated 14 sec ago" stays accurate without the
-    /// user having to click away and back.
-    @State private var tickerDate: Date = Date()
-    private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-
     /// Confirmation state for the destructive factory-reset button.
     @State private var showingResetConfirmation: Bool = false
 
@@ -411,9 +404,11 @@ private struct DeveloperSettingsView: View {
                 }
 
                 LabeledContent("Average rate") {
-                    Text(averageRateLabel)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Text(averageRateLabel(now: context.date))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
                 }
             } header: {
                 Text("Fetch Diagnostics")
@@ -428,7 +423,9 @@ private struct DeveloperSettingsView: View {
                     stateLabel
                 }
                 LabeledContent("Rate-limit cooldown") {
-                    rateLimitLabel
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        rateLimitLabel(now: context.date)
+                    }
                 }
                 LabeledContent("Token refresh") {
                     Text(authPhaseDescription)
@@ -532,9 +529,6 @@ private struct DeveloperSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .onReceive(ticker) { now in
-            tickerDate = now
-        }
         .confirmationDialog(
             "Reset all settings and restart?",
             isPresented: $showingResetConfirmation,
@@ -575,8 +569,8 @@ private struct DeveloperSettingsView: View {
         }
     }
 
-    private var averageRateLabel: String {
-        let elapsed = tickerDate.timeIntervalSince(usage.diagnosticsStartedAt)
+    private func averageRateLabel(now: Date) -> String {
+        let elapsed = now.timeIntervalSince(usage.diagnosticsStartedAt)
         guard elapsed >= 1, usage.networkRequestCount > 0 else { return "—" }
         let perMinute = Double(usage.networkRequestCount) / (elapsed / 60.0)
         return String(format: "%.2f req/min", perMinute)
@@ -652,9 +646,9 @@ private struct DeveloperSettingsView: View {
     }
 
     @ViewBuilder
-    private var rateLimitLabel: some View {
-        if let until = usage.rateLimitedUntil, until > tickerDate {
-            let remaining = Int(until.timeIntervalSince(tickerDate))
+    private func rateLimitLabel(now: Date) -> some View {
+        if let until = usage.rateLimitedUntil, until > now {
+            let remaining = Int(until.timeIntervalSince(now))
             Label("Active — clears in \(remaining)s", systemImage: "hourglass")
                 .labelStyle(.titleAndIcon)
                 .foregroundStyle(.orange)

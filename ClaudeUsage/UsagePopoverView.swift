@@ -9,7 +9,6 @@
 //
 
 import AppKit
-import Combine
 import SwiftUI
 
 struct UsagePopoverView: View {
@@ -155,14 +154,8 @@ private struct MainContentView: View {
                 .help("Refresh now")
             }
             Button {
-                // Dismiss the MenuBarExtra panel first so it doesn't
-                // sit on top of the Settings window. The panel is the
-                // only NSPanel this app owns.
-                for case let panel as NSPanel in NSApp.windows {
-                    panel.close()
-                }
-                // Bring the app forward so the Settings window isn't buried
-                // behind whatever was focused when the popover dismissed.
+                MenuBarPanel.close()
+                // Bring the app forward so Settings isn't buried behind the previous app.
                 NSApp.activate(ignoringOtherApps: true)
                 openSettings()
             } label: {
@@ -246,12 +239,7 @@ private struct MainContentView: View {
             Spacer(minLength: 0)
             Button {
                 if let url = URL(string: "https://claude.ai/settings/usage") {
-                    // Dismiss the popover before opening the browser so
-                    // it doesn't sit on top of the window that appears.
-                    for case let panel as NSPanel in NSApp.windows {
-                        panel.close()
-                    }
-                    BrowserHelper.open(url)
+                    MenuBarPanel.open(url)
                 }
             } label: {
                 HStack(spacing: 3) {
@@ -275,8 +263,7 @@ private struct MainContentView: View {
 
 // MARK: - Bar
 
-/// A single Claude usage bar. Uses a native capsule progress indicator so it
-/// plays well with macOS 26 Liquid Glass and dark-mode tinting.
+/// One quota: title, percentage, bar and time to reset.
 struct QuotaBarView: View {
     let bar: UsageSnapshot.Bar
 
@@ -291,35 +278,25 @@ struct QuotaBarView: View {
                     .foregroundStyle(.secondary)
             }
 
-            GeometryReader { proxy in
-                ZStack(alignment: .leading) {
-                    // Track
-                    Capsule()
-                        .fill(.quaternary)
-
-                    // Fill
-                    Capsule()
-                        .fill(
-                            LinearGradient(
-                                colors: fillGradient,
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .frame(width: max(6, proxy.size.width * bar.fraction))
-                }
-            }
-            .frame(height: 8)
+            CapsuleBar(fraction: bar.fraction, colors: fillGradient)
 
             if let resetsAt = bar.resetsAt {
-                Text(resetLabel(for: resetsAt))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                // Re-rendered each minute so the countdown doesn't freeze while the popover stays open.
+                TimelineView(.everyMinute) { context in
+                    Text(Self.resetLabel(for: resetsAt, now: context.date))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(bar.title) \(bar.percentLabel)")
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var accessibilityText: String {
+        let reset = bar.resetsAt.map { ", " + Self.resetLabel(for: $0, now: Date()) } ?? ""
+        return "\(bar.title) \(bar.percentLabel)\(reset)"
     }
 
     private var fillGradient: [Color] {
@@ -336,10 +313,45 @@ struct QuotaBarView: View {
         }
     }
 
-    private func resetLabel(for date: Date) -> String {
+    private static func resetLabel(for date: Date, now: Date) -> String {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .full
-        return "Resets \(formatter.localizedString(for: date, relativeTo: Date()))"
+        return "Resets \(formatter.localizedString(for: date, relativeTo: now))"
+    }
+}
+
+/// A capsule track filled to `fraction` with a horizontal gradient. Never
+/// thinner than a dot, so an empty quota still shows where the bar is.
+struct CapsuleBar: View {
+    let fraction: Double
+    let colors: [Color]
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.quaternary)
+                Capsule()
+                    .fill(LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing))
+                    .frame(width: max(6, proxy.size.width * fraction))
+            }
+        }
+        .frame(height: 8)
+    }
+}
+
+/// The MenuBarExtra panel is the only NSPanel the app owns. Closing it first
+/// keeps it from floating over the window being opened.
+enum MenuBarPanel {
+    static func close() {
+        for case let panel as NSPanel in NSApp.windows {
+            panel.close()
+        }
+    }
+
+    static func open(_ url: URL) {
+        close()
+        BrowserHelper.open(url)
     }
 }
 
@@ -374,22 +386,7 @@ private struct ExtraUsageCard: View {
                     .foregroundStyle(.secondary)
             }
 
-            GeometryReader { proxy in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(.quaternary)
-                    Capsule()
-                        .fill(
-                            LinearGradient(
-                                colors: [.purple, .indigo],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .frame(width: max(6, proxy.size.width * summary.fraction))
-                }
-            }
-            .frame(height: 8)
+            CapsuleBar(fraction: summary.fraction, colors: [.purple, .indigo])
 
             Text(balanceText)
                 .font(.caption2)
@@ -446,7 +443,7 @@ private struct MissingCredentialsView: View {
                     Image(systemName: "1.circle.fill")
                         .foregroundStyle(.tint)
                 }
-                Text("npm install -g @anthropic-ai/claude-code")
+                Text("curl -fsSL https://claude.ai/install.sh | bash")
                     .font(.system(.caption, design: .monospaced))
                     .padding(6)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -467,8 +464,8 @@ private struct MissingCredentialsView: View {
             }
 
             Button {
-                if let url = URL(string: "https://docs.claude.com/en/docs/claude-code/overview") {
-                    BrowserHelper.open(url)
+                if let url = URL(string: "https://code.claude.com/docs/en/setup") {
+                    MenuBarPanel.open(url)
                 }
             } label: {
                 Label("Claude Code setup docs", systemImage: "arrow.up.forward.app")
@@ -584,16 +581,9 @@ private extension Text {
 
 // MARK: - Rate-limited view
 
-/// Shown instead of `ErrorView` when the store is in an `.error` state that
-/// was caused by a 429. Drives a live countdown from the current
-/// `rateLimitedUntil` timestamp so the user sees an accurate remaining
-/// time instead of a static string that was stale the moment it was set.
+/// A 429 with nothing on screen yet: a live countdown to the end of the cooldown.
 private struct RateLimitedView: View {
     let clearAt: Date
-
-    /// Re-published every second to force the countdown text to refresh.
-    @State private var now: Date = Date()
-    private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -604,16 +594,17 @@ private struct RateLimitedView: View {
                     .font(.subheadline.weight(.semibold))
             }
 
-            Text(description)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .monospacedDigit()
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Text(description(now: context.date))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .monospacedDigit()
+            }
         }
-        .onReceive(ticker) { now = $0 }
     }
 
-    private var description: String {
+    private func description(now: Date) -> String {
         let remaining = clearAt.timeIntervalSince(now)
         if remaining <= 0 {
             return "The cooldown has cleared. The next scheduled poll will fetch fresh data."
@@ -653,12 +644,9 @@ enum RateLimitCountdown {
 private struct CooldownFooterLine: View {
     let clearAt: Date
 
-    @State private var now: Date = Date()
-    private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-
     var body: some View {
-        Group {
-            if let text = RateLimitCountdown.footerText(clearAt: clearAt, now: now) {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            if let text = RateLimitCountdown.footerText(clearAt: clearAt, now: context.date) {
                 // The symbol is interpolated into the text run rather than
                 // placed in an HStack so it is laid out as a glyph on the
                 // same line: an HStack centres the image's own box, which
@@ -669,7 +657,6 @@ private struct CooldownFooterLine: View {
                     .lineLimit(1)
             }
         }
-        .onReceive(ticker) { now = $0 }
     }
 }
 
@@ -788,13 +775,7 @@ private struct ServiceStatusRow: View {
     private func incidentRow(_ incident: StatusSnapshot.Incident) -> some View {
         if let url = incident.url {
             Button {
-                // Match the popover's other web-link buttons: dismiss
-                // first so the browser window doesn't end up behind a
-                // floating popover panel.
-                for case let panel as NSPanel in NSApp.windows {
-                    panel.close()
-                }
-                BrowserHelper.open(url)
+                MenuBarPanel.open(url)
             } label: {
                 HStack(spacing: 3) {
                     Text(incident.name)
