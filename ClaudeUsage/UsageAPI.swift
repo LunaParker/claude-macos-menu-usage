@@ -91,7 +91,6 @@ struct UsageResponse: Decodable, Sendable {
 // MARK: - API client
 
 enum UsageAPIError: LocalizedError {
-    case credentialExpired
     case unauthorized
     /// The endpoint returned HTTP 429. The associated value is the
     /// server-suggested retry delay in seconds (from `Retry-After`), or
@@ -103,8 +102,6 @@ enum UsageAPIError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .credentialExpired:
-            return "Your Claude Code token has expired. Open Claude Code to refresh it."
         case .unauthorized:
             return "Claude rejected the stored token. Run `claude` to re-authenticate."
         case .rateLimited:
@@ -122,20 +119,21 @@ enum UsageAPIError: LocalizedError {
     }
 }
 
-struct UsageAPIClient {
+/// Fetches usage with an access token. `UsageStore` checks expiry first.
+protocol UsageFetching {
+    func fetch(accessToken: String) async throws -> UsageResponse
+}
+
+struct UsageAPIClient: UsageFetching {
     /// The undocumented endpoint that Claude Code itself calls for status-line data.
     /// This is not a public API and may change without notice.
     var endpoint: URL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
     var http: HTTPClient = .shared
 
-    func fetch(using credentials: ClaudeCredentials) async throws -> UsageResponse {
-        if credentials.isExpired {
-            throw UsageAPIError.credentialExpired
-        }
-
+    func fetch(accessToken: String) async throws -> UsageResponse {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "GET"
-        request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 20

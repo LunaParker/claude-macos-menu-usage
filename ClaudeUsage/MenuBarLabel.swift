@@ -58,35 +58,27 @@ struct MenuBarLabel: View {
         }
     }
 
+    /// The usage to show: kept through a transient failure, dropped once it's too old.
+    private var snapshot: UsageSnapshot? {
+        usage.presentation.menuBarSnapshot(now: Date())
+    }
+
     private var symbolName: String {
-        // SF Symbol "gauge.with.dots.needle.Npercent" variants ship on macOS 14+.
-        switch usage.state {
-        case .loaded(let snapshot):
-            let peak = snapshot.peakUtilization
-            if peak >= 0.9 { return "gauge.with.dots.needle.100percent" }
-            if peak >= 0.66 { return "gauge.with.dots.needle.67percent" }
-            if peak >= 0.33 { return "gauge.with.dots.needle.33percent" }
-            return "gauge.with.dots.needle.0percent"
-        default:
-            return "gauge.with.dots.needle.bottom.50percent"
-        }
+        guard let snapshot else { return "gauge.with.dots.needle.bottom.50percent" }
+        let peak = snapshot.peakUtilization
+        if peak >= 0.9 { return "gauge.with.dots.needle.100percent" }
+        if peak >= 0.66 { return "gauge.with.dots.needle.67percent" }
+        if peak >= 0.33 { return "gauge.with.dots.needle.33percent" }
+        return "gauge.with.dots.needle.0percent"
     }
 
-    /// The formatted session-bar percentage, or `nil` if we don't have a
-    /// snapshot yet (in which case we just render the icon alone).
     private var sessionPercentLabel: String? {
-        if case .loaded(let snapshot) = usage.state {
-            return snapshot.session.percentLabel
-        }
-        return nil
+        snapshot?.session.percentLabel
     }
 
-    /// True when the session quota has crossed the warning threshold
-    /// (≥ 90%) but hasn't been fully exhausted (< 100%). Used to decide
-    /// whether to render the exclamation mark in place of the numeric
-    /// percentage. Returns false if we don't have a snapshot yet.
+    /// Session at 90% or more but below 100%, where the full gauge says it all.
     private var shouldShowSessionWarning: Bool {
-        guard case .loaded(let snapshot) = usage.state else { return false }
+        guard let snapshot else { return false }
         let fraction = snapshot.session.fraction
         return fraction >= 0.9 && fraction < 1.0
     }

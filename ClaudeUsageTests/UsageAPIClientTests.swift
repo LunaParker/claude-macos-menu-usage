@@ -18,7 +18,7 @@ struct UsageAPIClientTests {
     func requestHeaders() async throws {
         let (client, url) = makeClient(status: 200, body: "{}")
 
-        _ = try await client.fetch(using: TestCredentials.valid(token: "tok-123"))
+        _ = try await client.fetch(accessToken: "tok-123")
 
         let request = try #require(StubURLProtocol.requests(to: url).first)
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer tok-123")
@@ -32,7 +32,7 @@ struct UsageAPIClientTests {
         {"five_hour": {"utilization": 42.0, "resets_at": "2026-04-11T18:00:01.219127+00:00"}, "seven_day": null}
         """)
 
-        let response = try await client.fetch(using: TestCredentials.valid())
+        let response = try await client.fetch(accessToken: "tok")
 
         let resetsAt = try #require(response.fiveHour?.resetsAt)
         #expect(abs(resetsAt.timeIntervalSince1970 - 1_775_930_401.219) < 0.001)
@@ -44,7 +44,7 @@ struct UsageAPIClientTests {
         let (client, _) = makeClient(status: status, body: "")
 
         let error = await #expect(throws: UsageAPIError.self) {
-            try await client.fetch(using: TestCredentials.valid())
+            try await client.fetch(accessToken: "tok")
         }
         guard case .unauthorized = error else {
             Issue.record("expected .unauthorized, got \(String(describing: error))")
@@ -57,7 +57,7 @@ struct UsageAPIClientTests {
         let (client, _) = makeClient(status: 429, headers: ["Retry-After": "120"], body: "")
 
         let error = await #expect(throws: UsageAPIError.self) {
-            try await client.fetch(using: TestCredentials.valid())
+            try await client.fetch(accessToken: "tok")
         }
         guard case .rateLimited(let retryAfter) = error else {
             Issue.record("expected .rateLimited, got \(String(describing: error))")
@@ -71,7 +71,7 @@ struct UsageAPIClientTests {
         let (client, _) = makeClient(status: 503, body: "")
 
         let error = await #expect(throws: UsageAPIError.self) {
-            try await client.fetch(using: TestCredentials.valid())
+            try await client.fetch(accessToken: "tok")
         }
         guard case .http(503) = error else {
             Issue.record("expected .http(503), got \(String(describing: error))")
@@ -84,7 +84,7 @@ struct UsageAPIClientTests {
         let (client, _) = makeClient(status: 200, body: "<html>")
 
         let error = await #expect(throws: UsageAPIError.self) {
-            try await client.fetch(using: TestCredentials.valid())
+            try await client.fetch(accessToken: "tok")
         }
         guard case .decoding = error else {
             Issue.record("expected .decoding, got \(String(describing: error))")

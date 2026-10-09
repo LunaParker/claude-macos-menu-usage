@@ -9,144 +9,132 @@
 import Foundation
 import Observation
 
-// MARK: - Observable store
-
-/// The single source of truth the popover observes. Lives for the lifetime
-/// of the app and polls on a fixed interval from the moment the user
-/// finishes onboarding until the app quits, so the menu bar label stays
-/// fresh even while the popover is closed.
+/// The single source of truth the popover observes. Polls from the moment
+/// onboarding finishes until the app quits, so the menu bar stays fresh.
 @Observable
 @MainActor
 final class UsageStore {
-    enum State {
-        case idle
-        case loading
-        case loaded(UsageSnapshot)
-        case missingCredentials
-        case error(String)
+    struct Dependencies {
+        var credentials: any CredentialSource
+        var fetcher: any UsageFetching
+        var notifier: any UsageNotifying
+        var scheduler: any Scheduler
+        var now: () -> Date
+        var defaults: UserDefaults
+
+        static func live(notifier: any UsageNotifying) -> Dependencies {
+            Dependencies(
+                credentials: KeychainCredentialSource(),
+                fetcher: UsageAPIClient(),
+                notifier: notifier,
+                scheduler: LiveScheduler(),
+                now: Date.init,
+                defaults: .standard
+            )
+        }
     }
 
-    private(set) var state: State = .idle
-    private(set) var isRefreshing: Bool = false
-    private(set) var lastUpdated: Date?
+    enum Trigger {
+        case poll
+        /// The popover opened; debounced against the last success.
+        case popover
+        /// "Try again", the Reauthenticate notification or Force Refresh.
+        case manual
+        /// A quick retry after a transient failure.
+        case retry
+        /// A background `claude` refresh just exited.
+        case postRefresh
+    }
 
-    /// True while a background `claude` process is actively running to
-    /// refresh credentials. Used by the popover to swap the "Try again"
-    /// button for a progress indicator.
-    private(set) var isRefreshingCredentials: Bool = false
+    /// The latest usage. Kept through transient failures; `failure` says why it may be stale.
+    private(set) var snapshot: UsageSnapshot?
+    private(set) var failure: UsageFailure?
+    private(set) var isRefreshing = false
+    private(set) var lastUpdated: Date?
+    private(set) var rateLimitedUntil: Date?
+
+    /// True while a background `claude` process is refreshing the token.
+    private(set) var isRefreshingCredentials = false
+
+    /// Which read path last produced credentials, for the Developer tab.
+    private(set) var keychainReadMethod: KeychainReadMethod?
+
+    var presentation: UsagePresentation {
+        UsagePresentation(snapshot: snapshot, failure: failure)
+    }
 
     // MARK: Diagnostic counters (surfaced on the Developer tab)
 
-    /// When the diagnostic measurement window started. Equal to app launch
-    /// time by default, but `resetDiagnostics()` resets this to `now` so
-    /// users can benchmark the request rate from a fresh baseline.
-    private(set) var diagnosticsStartedAt: Date = Date()
+    /// When the diagnostic measurement window started; reset by `resetDiagnostics()`.
+    private(set) var diagnosticsStartedAt: Date
 
-    /// Total number of HTTP requests actually dispatched to
-    /// `/api/oauth/usage` during the current measurement window. Does
-    /// **not** include calls skipped by the debounce / rate-limit
-    /// cooldown / re-entrancy guard — only the ones that hit the network.
+    /// Requests that reached the network. Calls skipped by the debounce,
+    /// cooldown or re-entrancy guard aren't counted.
     private(set) var networkRequestCount: Int = 0
 
-    /// Timestamp of the most recent network attempt, regardless of outcome.
-    /// Separate from `lastUpdated`, which only tracks successful responses.
+    /// The most recent network attempt, whatever its outcome.
     private(set) var lastNetworkAttemptAt: Date?
 
-    /// Exposed (read-only) for the Developer tab so it can show a cooldown
-    /// indicator. Still mutated internally by `refresh()`.
-    private(set) var rateLimitedUntil: Date?
+    @ObservationIgnored private let dependencies: Dependencies
+    @ObservationIgnored private var pollTask: Task<Void, Never>?
+    @ObservationIgnored private var retryWork: ScheduledWork?
+    @ObservationIgnored private var consecutiveTransientFailures = 0
 
-    /// Which keychain read path last succeeded. Updated after every
-    /// successful credential load so the Developer tab can display it.
-    private(set) var keychainReadMethod: KeychainReadMethod?
+    /// Stops a background refresh whose token is still expired from starting
+    /// another one straight away; cleared by a success or a manual retry.
+    @ObservationIgnored private var pendingPostRefreshRetry = false
 
-    /// Guards against a feedback loop: background `claude` exits →
-    /// retry → still expired → launches another `claude` → exits →
-    /// retry → … The flag is set when a post-refresh retry is
-    /// scheduled and cleared when any refresh succeeds.
-    private var pendingPostRefreshRetry = false
+    /// Reading credentials launches `security`, so they're cached until the
+    /// token expires or the API rejects it.
+    @ObservationIgnored private var cachedCredentials: ClaudeCredentials?
 
-    let notificationManager = NotificationManager()
-    private let client = UsageAPIClient()
-    private let credentialSource: CredentialSource = KeychainCredentialSource()
-    private var pollTask: Task<Void, Never>?
+    /// Allowed poll interval, in seconds. Below two minutes the endpoint's rate
+    /// limiter starts to bite (anthropics/claude-code#31021).
+    private static let pollIntervalRange = 120...300
 
-    /// In-memory credential cache. Reading credentials launches a
-    /// `/usr/bin/security` subprocess, so we avoid doing it on every
-    /// poll cycle. The cache is invalidated when the token expires or
-    /// the API rejects it, reducing subprocess invocations to at most
-    /// once per token rotation (~2–3×/day).
-    private var cachedCredentials: ClaudeCredentials?
-
-    /// Allowed user-configurable range for the poll interval, in seconds.
-    /// Anchored at 5 minutes (the default) and floored at 2 minutes — any
-    /// lower and we'd start tripping the endpoint's rate limiter again.
-    private static let minPollIntervalSeconds = 120
-    private static let maxPollIntervalSeconds = 300
-
-    /// How often the store refreshes in the background. Read fresh from
-    /// `UserDefaults` on every tick so a change from the Settings window
-    /// applies on the next scheduled iteration without any observers.
-    /// `/api/oauth/usage` is an undocumented endpoint with an aggressive
-    /// rate limiter — see anthropics/claude-code#31021.
-    private var pollInterval: Duration {
-        let stored = UserDefaults.standard[SettingsKeys.pollIntervalSeconds]
-        let allowed = Self.minPollIntervalSeconds...Self.maxPollIntervalSeconds
-        return .seconds(allowed.contains(stored) ? stored : SettingsKeys.pollIntervalSeconds.defaultValue)
-    }
-
-    /// Minimum time between successful fetches when the popover is opened.
-    /// Protects the undocumented endpoint from rapid popover open/close
-    /// patterns — if a successful fetch happened within this window, we
-    /// show the existing snapshot instead of firing another request.
+    /// Popover opens within this long of a success show the existing snapshot.
     private let popoverDebounceInterval: TimeInterval = 15
 
     /// The endpoint is known for persistent 429s (anthropics/claude-code#31021),
     /// so a 429 without a usable Retry-After means five quiet minutes.
     private let rateLimitPolicy = RateLimitPolicy(defaultBackoff: 300)
 
-    /// Returns cached credentials when they're still valid, otherwise
-    /// reads fresh credentials from the Keychain (which may trigger a
-    /// macOS authorization prompt).
-    private func loadCredentials() async throws -> ClaudeCredentials {
-        if let cached = cachedCredentials, !cached.isExpired {
-            DiagnosticLog.shared.log(.keychain, "Using cached credentials")
-            return cached
-        }
-        DiagnosticLog.shared.log(.keychain, "Cache miss, loading from Keychain")
-        let fresh = try await credentialSource.load()
-        cachedCredentials = fresh.credentials
-        keychainReadMethod = fresh.method
-        return fresh.credentials
+    init(dependencies: Dependencies) {
+        self.dependencies = dependencies
+        diagnosticsStartedAt = dependencies.now()
+    }
+
+    /// Read on every tick, so a change in Settings applies to the next sleep.
+    private var pollInterval: Duration {
+        let stored = dependencies.defaults[SettingsKeys.pollIntervalSeconds]
+        return .seconds(Self.pollIntervalRange.contains(stored) ? stored : SettingsKeys.pollIntervalSeconds.defaultValue)
+    }
+
+    /// 30 s after the first transient failure, doubling each time, never
+    /// longer than the poll interval.
+    static func transientRetryDelay(afterFailures failures: Int, pollInterval: Duration) -> Duration {
+        let doubling = Duration.seconds(30) * (1 << min(max(failures - 1, 0), 10))
+        return min(doubling, pollInterval)
     }
 
     // MARK: Lifecycle
 
-    /// Starts the background poll loop. Safe to call repeatedly — a second
-    /// call while polling is already active is a no-op.
+    /// Starts the background poll loop. A second call while polling is a no-op.
     func startPolling() {
         guard pollTask == nil else { return }
-        notificationManager.registerAsDelegate()
-        notificationManager.reauthenticateHandler = { [weak self] in
-            self?.manualRetry()
-        }
-        Task { await notificationManager.refreshAuthorizationStatus() }
         CredentialRefresher.onRefreshEnded = { [weak self] in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                // credentialsBecameValid() also calls onRefreshEnded,
-                // but that fires during a normal successful fetch —
-                // not after a background claude process. Only retry
-                // when a real background process just finished.
+                // credentialsBecameValid() also lands here after a normal
+                // successful fetch; only a background process exit should retry.
                 let wasRefreshingInBackground = self.isRefreshingCredentials
                 self.isRefreshingCredentials = false
                 guard wasRefreshingInBackground else { return }
                 self.cachedCredentials = nil
                 guard !self.pendingPostRefreshRetry else { return }
                 self.pendingPostRefreshRetry = true
-                Task { @MainActor [weak self] in
-                    try? await Task.sleep(for: .seconds(2))
-                    await self?.refresh()
+                self.dependencies.scheduler.schedule(after: .seconds(2)) { [weak self] in
+                    await self?.refresh(trigger: .postRefresh)
                 }
             }
         }
@@ -158,75 +146,45 @@ final class UsageStore {
         pollTask = nil
     }
 
-    /// Cancels the currently running poll task and starts a new one with
-    /// whatever `pollInterval` currently resolves to. Used by the Settings
-    /// window when the user changes the interval so the new cadence takes
-    /// effect immediately instead of after the existing sleep finishes.
-    /// Does **not** fire an extra refresh — the loop simply begins its
-    /// first sleep at the new duration.
+    /// Restarts the poll loop at the current interval without fetching now.
     func reschedulePolling() {
         guard pollTask != nil else { return }
         stopPolling()
         pollTask = makePollTask(fetchImmediately: false)
     }
 
-    /// Called when the user opens the popover. Fires a one-off debounced
-    /// refresh so the bars are fresh on screen, but doesn't restart the
-    /// poll loop — the background poll continues on its own schedule
-    /// regardless.
+    /// Called when the user opens the popover.
     func refreshNow() {
-        Task { @MainActor [weak self] in
-            await self?.refresh(minIntervalSinceLastSuccess: self?.popoverDebounceInterval ?? 0)
-        }
+        Task { await refresh(trigger: .popover) }
     }
 
-    /// Called when the user explicitly asks for another attempt: the
-    /// popover's "Try again" button, or the auth-lost notification's
-    /// "Reauthenticate" action. Drops the credential cache and clears the
-    /// post-refresh retry guard, then refreshes — which re-reads the
-    /// Keychain (picking up a token some other Claude Code process may
-    /// already have rotated) and only launches `claude` if the token is
-    /// genuinely expired. Without the guard resets, the background poll's
-    /// deduplication would leave the user stuck on a "Run `claude` to
-    /// re-authenticate" message with no recourse.
-    ///
-    /// The launch-deduplication guard is reset only when no background
-    /// `claude` is running. The popover hides "Try again" during a
-    /// refresh, but the notification action can arrive mid-refresh, and
-    /// resetting the guard there would only start a second `claude`
-    /// alongside the first. Left alone, its exit triggers the post-refresh
-    /// retry, which the cleared `pendingPostRefreshRetry` now permits.
+    /// "Try again" and the Reauthenticate notification: drop the credential
+    /// cache and the retry guards, then refresh, which re-reads the Keychain and
+    /// only launches `claude` if the token really has expired.
     func manualRetry() {
         cachedCredentials = nil
         pendingPostRefreshRetry = false
+        // Resetting while a refresh runs would start a second `claude` beside it.
         if !isRefreshingCredentials {
             CredentialRefresher.resetAttemptGuard()
         }
-        Task { @MainActor [weak self] in
-            await self?.refresh()
-        }
+        Task { await refresh(trigger: .manual) }
     }
 
-    /// Wipes the diagnostic counters and resets the measurement window to
-    /// `now`. Used by the Developer tab's Reset button so the user can
-    /// benchmark the fetch rate from a fresh baseline.
+    /// Wipes the diagnostic counters so the request rate can be measured afresh.
     func resetDiagnostics() {
         networkRequestCount = 0
         lastNetworkAttemptAt = nil
-        diagnosticsStartedAt = Date()
+        diagnosticsStartedAt = dependencies.now()
     }
 
-    /// Builds the poll task body. If `fetchImmediately` is false the loop
-    /// sleeps first and then refreshes, which is what `reschedulePolling()`
-    /// wants: the user just changed the cadence, we don't need to fetch
-    /// again right now, we just need to respect the new sleep duration.
     private func makePollTask(fetchImmediately: Bool) -> Task<Void, Never> {
         Task { [weak self] in
-            guard let self else { return }
             var shouldFetch = fetchImmediately
             while !Task.isCancelled {
+                guard let self else { return }
                 if shouldFetch {
-                    await self.refresh()
+                    await self.refresh(trigger: .poll)
                 }
                 shouldFetch = true
                 try? await Task.sleep(for: self.pollInterval)
@@ -236,27 +194,15 @@ final class UsageStore {
 
     // MARK: Refresh
 
-    /// Fetches the usage endpoint and updates `state`.
-    ///
-    /// - Parameter minIntervalSinceLastSuccess: If greater than zero and the
-    ///   last successful fetch happened within this many seconds, the call
-    ///   is a no-op. Lets the popover-open path avoid hitting the server
-    ///   when the background poll just refreshed.
-    func refresh(minIntervalSinceLastSuccess: TimeInterval = 0) async {
-        // Re-entrancy guard: if a refresh is already in flight, don't fire
-        // a second one. The background poll and the popover both call this,
-        // and back-to-back requests are exactly what trips the 429 limiter.
+    /// Fetches usage unless a refresh is in flight, the popover debounce
+    /// applies or a 429 cooldown is running.
+    func refresh(trigger: Trigger = .manual) async {
         guard !isRefreshing else { return }
-
-        // Debounce rapid popover opens against the most recent success.
-        if minIntervalSinceLastSuccess > 0,
-           let lastUpdated,
-           Date().timeIntervalSince(lastUpdated) < minIntervalSinceLastSuccess {
+        let now = dependencies.now()
+        if trigger == .popover, let lastUpdated, now.timeIntervalSince(lastUpdated) < popoverDebounceInterval {
             return
         }
-
-        // Respect any active rate-limit cooldown from a previous 429.
-        if let rateLimitedUntil, Date() < rateLimitedUntil {
+        if let rateLimitedUntil, now < rateLimitedUntil {
             return
         }
 
@@ -268,88 +214,55 @@ final class UsageStore {
             credentials = try await loadCredentials()
         } catch KeychainError.itemNotFound {
             cachedCredentials = nil
-            state = .missingCredentials
-            notificationManager.notifyAuthenticationLost()
+            failure = .signedOut
+            dependencies.notifier.authenticationLost()
             return
         } catch {
             cachedCredentials = nil
-            state = .error(error.localizedDescription)
+            failure = .credentialsUnreadable(error.localizedDescription)
             return
         }
 
-        // Bail early if the access token has expired — there's no point
-        // hitting the API with a dead token. Instead, launch Claude Code
-        // in the background so it can use the refresh token (or prompt
-        // for interactive login) and write fresh credentials to the
-        // Keychain. The background poll will pick them up automatically.
         if credentials.isExpired {
             cachedCredentials = nil
             DiagnosticLog.shared.log(.refresh, "Token expired, attempting background refresh")
-            handleAuthenticationLost(reason: "Your Claude Code token has expired.")
+            handleAuthenticationLost()
             return
-        }
-
-        // Surface a spinner only on the first load — subsequent refreshes
-        // keep the previous snapshot visible so the bars don't flicker.
-        if case .loaded = state {
-            // keep snapshot, just toggle isRefreshing
-        } else {
-            state = .loading
         }
 
         await fetchUsage(using: credentials, retryOnRotation: true)
     }
 
-    /// Performs one request against the usage endpoint and applies the
-    /// outcome to `state`.
-    ///
-    /// - Parameter retryOnRotation: When `true`, a 401/403 is first treated
-    ///   as a possible token rotation rather than a lost login: the
-    ///   credential cache is dropped, the Keychain re-read, and if it now
-    ///   holds a different, unexpired token the request is retried once
-    ///   with it — silently, with no notification and no background
-    ///   `claude` launch. Claude Code rotates the access token whenever it
-    ///   refreshes and the previous token is rejected immediately, so a
-    ///   401 on a cached token usually means another Claude Code process
-    ///   (typically the user's terminal session) already did the work.
-    ///   The diagnostic log showed nearly every "Authentication Lost"
-    ///   notification was this case.
+    private func loadCredentials() async throws -> ClaudeCredentials {
+        if let cached = cachedCredentials, !cached.isExpired {
+            DiagnosticLog.shared.log(.keychain, "Using cached credentials")
+            return cached
+        }
+        DiagnosticLog.shared.log(.keychain, "Cache miss, loading from Keychain")
+        let fresh = try await dependencies.credentials.load()
+        cachedCredentials = fresh.credentials
+        keychainReadMethod = fresh.method
+        return fresh.credentials
+    }
+
+    /// One request against the usage endpoint. A 401 on a cached token usually
+    /// means Claude Code rotated it, so with `retryOnRotation` the Keychain is
+    /// re-read and a newer token retried once, silently.
     private func fetchUsage(using credentials: ClaudeCredentials, retryOnRotation: Bool) async {
-        // Count this as a real network attempt. Placed after all the
-        // early-return guards so the counter only reflects requests that
-        // actually hit the wire — the Developer tab uses this to verify
-        // the app isn't spamming the endpoint.
         networkRequestCount += 1
-        lastNetworkAttemptAt = Date()
+        lastNetworkAttemptAt = dependencies.now()
         DiagnosticLog.shared.log(.api, "Request #\(networkRequestCount) started")
 
         do {
-            let response = try await client.fetch(using: credentials)
+            let response = try await dependencies.fetcher.fetch(accessToken: credentials.accessToken)
             DiagnosticLog.shared.log(.api, "HTTP 200 — usage data received")
-            CredentialRefresher.credentialsBecameValid()
-            pendingPostRefreshRetry = false
-            notificationManager.authenticationRestored()
-            let snapshot = Self.buildSnapshot(from: response)
-            state = .loaded(snapshot)
-            lastUpdated = snapshot.fetchedAt
-            rateLimitedUntil = nil
-            notificationManager.evaluateThresholds(snapshot: snapshot)
+            succeeded(with: response)
         } catch UsageAPIError.rateLimited(let retryAfter) {
             let backoff = rateLimitPolicy.cooldown(retryAfter: retryAfter)
             DiagnosticLog.shared.log(.api, "HTTP 429 — rate limited, backoff \(Int(backoff))s")
-            rateLimitedUntil = Date().addingTimeInterval(backoff)
-            // If we already had a good snapshot, keep it visible rather than
-            // replacing the bars with an error screen — the data is stale
-            // but still the most useful thing we can show the user.
-            if case .loaded = state { return }
-            state = .error(UsageAPIError.rateLimited(retryAfter: backoff).errorDescription ?? "Rate limited.")
-        } catch UsageAPIError.credentialExpired {
-            // Safety net — the early `isExpired` check in `refresh()` should
-            // catch this, but a narrow race between the check and the fetch
-            // call could let a just-expired token slip through.
-            DiagnosticLog.shared.log(.api, "Credential expired during fetch")
-            cachedCredentials = nil
-            handleAuthenticationLost(reason: "Your Claude Code token has expired.")
+            let until = dependencies.now().addingTimeInterval(backoff)
+            rateLimitedUntil = until
+            failure = .rateLimited(until: until)
         } catch UsageAPIError.unauthorized {
             DiagnosticLog.shared.log(.api, "HTTP 401/403 — token rejected")
             cachedCredentials = nil
@@ -359,24 +272,48 @@ final class UsageStore {
                 await fetchUsage(using: rotated, retryOnRotation: false)
                 return
             }
-            // The Keychain has nothing better to offer, so the token really
-            // was revoked or invalidated — running `claude` re-authenticates.
-            handleAuthenticationLost(reason: "Claude rejected the stored token.")
-        } catch let error as UsageAPIError {
-            DiagnosticLog.shared.log(.api, "API error: \(error.errorDescription ?? "unknown")")
-            state = .error(error.errorDescription ?? "Unknown usage API error.")
+            handleAuthenticationLost()
+        } catch UsageAPIError.transport(let error) {
+            DiagnosticLog.shared.log(.api, "API error: Network error: \(error.localizedDescription)")
+            failedTransiently(.offline(error.localizedDescription))
+        } catch UsageAPIError.http(let status) {
+            DiagnosticLog.shared.log(.api, "API error: HTTP \(status)")
+            failedTransiently(.server(status: status))
         } catch {
-            DiagnosticLog.shared.log(.api, "Error: \(error.localizedDescription)")
-            state = .error(error.localizedDescription)
+            DiagnosticLog.shared.log(.api, "API error: \(error.localizedDescription)")
+            failedTransiently(.unexpectedResponse)
         }
     }
 
-    /// Decides whether a rejected token should be retried with credentials
-    /// re-read from the Keychain. Returns the reloaded credentials when they
-    /// carry a different, unexpired access token; `nil` when the re-read
-    /// failed, returned the same token (no rotation happened), or returned
-    /// a token that is itself expired — that case needs the background
-    /// `claude` refresh, not another request.
+    private func succeeded(with response: UsageResponse) {
+        CredentialRefresher.credentialsBecameValid()
+        pendingPostRefreshRetry = false
+        retryWork?.cancel()
+        retryWork = nil
+        consecutiveTransientFailures = 0
+
+        let snapshot = Self.buildSnapshot(from: response, fetchedAt: dependencies.now())
+        self.snapshot = snapshot
+        lastUpdated = snapshot.fetchedAt
+        failure = nil
+        rateLimitedUntil = nil
+        dependencies.notifier.authenticationRestored()
+        dependencies.notifier.evaluateThresholds(snapshot: snapshot)
+    }
+
+    /// Keeps the snapshot and retries sooner than the next poll.
+    private func failedTransiently(_ failure: UsageFailure) {
+        self.failure = failure
+        consecutiveTransientFailures += 1
+        let delay = Self.transientRetryDelay(afterFailures: consecutiveTransientFailures, pollInterval: pollInterval)
+        retryWork?.cancel()
+        retryWork = dependencies.scheduler.schedule(after: delay) { [weak self] in
+            await self?.refresh(trigger: .retry)
+        }
+    }
+
+    /// Returns reloaded credentials when they carry a different, unexpired token;
+    /// nil when the re-read failed, found the same token or found an expired one.
     static func rotatedCredentials(
         replacing rejected: ClaudeCredentials,
         reloaded: ClaudeCredentials?
@@ -388,19 +325,13 @@ final class UsageStore {
         return reloaded
     }
 
-    /// Shared tail of every authentication-loss path: fire the one-shot
-    /// notification, launch the background `claude` refresh (a no-op when
-    /// one is already running), and set an error state whose wording
-    /// reflects whether a refresh is actually in progress — including one
-    /// that was already running before this call, which is what happens
-    /// when the popover opens or the notification is tapped mid-refresh.
-    private func handleAuthenticationLost(reason: String) {
-        notificationManager.notifyAuthenticationLost()
+    /// The token expired or was rejected: notify, launch the background refresh
+    /// (a no-op when one is running) and say which of the two is happening.
+    private func handleAuthenticationLost() {
+        dependencies.notifier.authenticationLost()
         if CredentialRefresher.refreshInBackground() {
             isRefreshingCredentials = true
         }
-        state = .error(isRefreshingCredentials
-            ? "\(reason) Refreshing in the background…"
-            : "\(reason) Run `claude` to re-authenticate.")
+        failure = isRefreshingCredentials ? .refreshingSignIn : .signInExpired(nextAttempt: nil)
     }
 }

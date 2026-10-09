@@ -253,7 +253,7 @@ private struct MonitoredServiceToggle: View {
 // MARK: - Notifications
 
 private struct NotificationsSettingsView: View {
-    @Environment(UsageStore.self) private var usage
+    @Environment(NotificationManager.self) private var notifications
 
     @AppStorage(SettingsKeys.notifyAt50Percent) private var notifyAt50: Bool
     @AppStorage(SettingsKeys.notifyAt75Percent) private var notifyAt75: Bool
@@ -262,7 +262,7 @@ private struct NotificationsSettingsView: View {
 
     var body: some View {
         Form {
-            if usage.notificationManager.authorizationStatus != .authorized {
+            if notifications.authorizationStatus != .authorized {
                 Section {
                     authorizationBanner
                 }
@@ -314,7 +314,7 @@ private struct NotificationsSettingsView: View {
         }
         .formStyle(.grouped)
         .task {
-            await usage.notificationManager.refreshAuthorizationStatus()
+            await notifications.refreshAuthorizationStatus()
         }
     }
 
@@ -326,8 +326,8 @@ private struct NotificationsSettingsView: View {
             get: { binding.wrappedValue },
             set: { newValue in
                 binding.wrappedValue = newValue
-                if newValue && usage.notificationManager.authorizationStatus == .notDetermined {
-                    Task { await usage.notificationManager.requestAuthorization() }
+                if newValue && notifications.authorizationStatus == .notDetermined {
+                    Task { await notifications.requestAuthorization() }
                 }
             }
         )
@@ -335,7 +335,7 @@ private struct NotificationsSettingsView: View {
 
     @ViewBuilder
     private var authorizationBanner: some View {
-        let status = usage.notificationManager.authorizationStatus
+        let status = notifications.authorizationStatus
         VStack(alignment: .leading, spacing: 8) {
             Label {
                 if status == .notDetermined {
@@ -357,11 +357,11 @@ private struct NotificationsSettingsView: View {
 
             if status == .notDetermined {
                 Button("Enable Notifications") {
-                    Task { await usage.notificationManager.requestAuthorization() }
+                    Task { await notifications.requestAuthorization() }
                 }
             } else if status == .denied {
                 Button("Open Notification Settings…") {
-                    usage.notificationManager.openNotificationSettings()
+                    notifications.openNotificationSettings()
                 }
             }
         }
@@ -372,6 +372,7 @@ private struct NotificationsSettingsView: View {
 
 private struct DeveloperSettingsView: View {
     @Environment(UsageStore.self) private var usage
+    @Environment(NotificationManager.self) private var notifications
     @Environment(\.openWindow) private var openWindow
 
     /// Drives relative-date labels to re-render once a second while the
@@ -465,11 +466,11 @@ private struct DeveloperSettingsView: View {
 
             Section {
                 Button("Send Test Notification") {
-                    Task { await usage.notificationManager.sendTestNotification() }
+                    Task { await notifications.sendTestNotification() }
                 }
                 .disabled(
-                    usage.notificationManager.authorizationStatus != .authorized
-                    && usage.notificationManager.authorizationStatus != .provisional
+                    notifications.authorizationStatus != .authorized
+                    && notifications.authorizationStatus != .provisional
                 )
             } header: {
                 Text("Notifications")
@@ -572,21 +573,20 @@ private struct DeveloperSettingsView: View {
 
     @ViewBuilder
     private var stateLabel: some View {
-        switch usage.state {
-        case .idle:
-            Text("Idle").foregroundStyle(.secondary)
+        switch usage.presentation {
         case .loading:
             Text("Loading…").foregroundStyle(.secondary)
-        case .loaded:
+        case .usage(_, nil):
             Label("Loaded", systemImage: "checkmark.circle.fill")
                 .labelStyle(.titleAndIcon)
                 .foregroundStyle(.green)
-        case .missingCredentials:
-            Label("Missing credentials", systemImage: "key.slash")
+        case .usage(_, .some(let notice)):
+            Label("Stale: \(String(describing: notice))", systemImage: "clock.badge.exclamationmark")
                 .labelStyle(.titleAndIcon)
                 .foregroundStyle(.orange)
-        case .error(let message):
-            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .lineLimit(2)
+        case .problem(let failure):
+            Label(String(describing: failure), systemImage: "exclamationmark.triangle.fill")
                 .labelStyle(.titleAndIcon)
                 .foregroundStyle(.red)
                 .lineLimit(2)

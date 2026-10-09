@@ -120,10 +120,7 @@ private struct MainContentView: View {
         }
         .padding(18)
         .task {
-            // Opening the popover forces an immediate refetch + resets the
-            // 60-second cycle so the user always sees fresh numbers the
-            // moment they click the menu bar icon. Polling itself keeps
-            // running in the background regardless of popover state.
+            // Fetch on open (debounced); the background poll carries on regardless.
             usage.refreshNow()
             // Fetch the service status only when its TTL has elapsed —
             // status.claude.com rarely changes and we don't want to hit
@@ -181,27 +178,18 @@ private struct MainContentView: View {
 
     @ViewBuilder
     private var content: some View {
-        switch usage.state {
-        case .idle, .loading:
+        switch usage.presentation {
+        case .loading:
             loadingView
-        case .loaded(let snapshot):
+        case .usage(let snapshot, _):
             loadedView(snapshot)
-        case .missingCredentials:
+        case .problem(.signedOut):
             MissingCredentialsView()
-        case .error(let message):
-            // If the error was caused by a 429 and the cooldown is still
-            // active, render the live-countdown view instead of the
-            // static error text so the user sees an accurate remaining
-            // time that updates every second.
-            if let until = usage.rateLimitedUntil, until > Date() {
-                RateLimitedView(clearAt: until)
-            } else {
-                ErrorView(
-                    message: message,
-                    isRefreshInProgress: usage.isRefreshingCredentials
-                ) {
-                    usage.manualRetry()
-                }
+        case .problem(.rateLimited(let until)):
+            RateLimitedView(clearAt: until)
+        case .problem(let failure):
+            ErrorView(failure: failure, isRefreshInProgress: usage.isRefreshingCredentials) {
+                usage.manualRetry()
             }
         }
     }
@@ -235,20 +223,21 @@ private struct MainContentView: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: 6) {
             footerRow
-            // A 429 while the bars are loaded keeps the stale snapshot on
-            // screen (see `UsageStore.fetchUsage`), so without this line a
-            // cooldown is invisible: the popover looks normal and quietly
-            // refuses to refresh. The line hides itself once the countdown
-            // clears, and `rateLimitedUntil` is nilled on the next success.
-            if case .loaded = usage.state, let clearAt = usage.rateLimitedUntil {
-                CooldownFooterLine(clearAt: clearAt)
+            // Bars kept through a failure are stale; say why, or nothing looks wrong.
+            if case .usage(_, .some(let notice)) = usage.presentation {
+                switch notice {
+                case .rateLimited(let until):
+                    CooldownFooterLine(clearAt: until)
+                default:
+                    NoticeFooterLine(failure: notice)
+                }
             }
         }
     }
 
     private var footerRow: some View {
         HStack(spacing: 8) {
-            if case .loaded = usage.state, let lastUpdated = usage.lastUpdated {
+            if case .usage = usage.presentation, let lastUpdated = usage.lastUpdated {
                 Text("Updated \(lastUpdated, style: .relative) ago")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -491,7 +480,7 @@ private struct MissingCredentialsView: View {
 }
 
 private struct ErrorView: View {
-    let message: String
+    let failure: UsageFailure
     var isRefreshInProgress: Bool = false
     let retry: () -> Void
 
@@ -500,10 +489,10 @@ private struct ErrorView: View {
             HStack(spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
-                Text("Couldn’t fetch usage")
+                Text(failure.title)
                     .font(.subheadline.weight(.semibold))
             }
-            Text(message)
+            Text(markdown: failure.detail)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -521,6 +510,75 @@ private struct ErrorView: View {
                     .controlSize(.small)
             }
         }
+    }
+}
+
+/// One footer line saying why the bars on screen may be stale.
+private struct NoticeFooterLine: View {
+    let failure: UsageFailure
+
+    var body: some View {
+        // The symbol is part of the text run so it sits on the caption's baseline.
+        Text("\(Text(Image(systemName: "exclamationmark.circle")).foregroundStyle(.orange)) \(Text(failure.notice).foregroundStyle(.secondary))")
+            .font(.caption2)
+            .lineLimit(1)
+    }
+}
+
+/// User-facing copy for each failure. `.signedOut` and `.rateLimited` have views of their own.
+private extension UsageFailure {
+    var title: String {
+        switch self {
+        case .signedOut: "Claude Code not authenticated"
+        case .credentialsUnreadable: "Couldn’t read your Claude Code credentials"
+        case .refreshingSignIn: "Refreshing Claude Code’s sign-in"
+        case .signInExpired: "Claude Code needs you to sign in again"
+        case .claudeNotFound: "Couldn’t find the claude command"
+        case .rateLimited: "Rate-limited by Claude"
+        case .offline: "Couldn’t reach Claude"
+        case .server(let status): "Claude’s usage endpoint returned HTTP \(status)"
+        case .unexpectedResponse: "Couldn’t read Claude’s usage response"
+        }
+    }
+
+    /// Markdown.
+    var detail: String {
+        switch self {
+        case .signedOut:
+            "No credentials in the Keychain or `~/.claude/.credentials.json`."
+        case .credentialsUnreadable(let reason):
+            reason
+        case .refreshingSignIn:
+            "The token expired, so Claude Code is refreshing it in the background. This usually takes a few seconds."
+        case .signInExpired:
+            "The background token refresh didn’t work. Run `claude` in Terminal and type `/login`, then try again."
+        case .claudeNotFound:
+            "The background token refresh needs Claude Code. Install it, or make sure `claude` is on your login shell’s PATH, then try again."
+        case .rateLimited:
+            "Claude’s usage endpoint is rate-limiting this app."
+        case .offline(let reason):
+            reason
+        case .server:
+            "This is usually temporary. The app will try again shortly."
+        case .unexpectedResponse:
+            "The endpoint may have changed. The app will keep trying."
+        }
+    }
+
+    var notice: String {
+        switch self {
+        case .refreshingSignIn: "Refreshing Claude Code’s sign-in…"
+        case .offline: "Couldn’t reach Claude · retrying soon"
+        case .server(let status): "Usage endpoint returned HTTP \(status) · retrying soon"
+        case .unexpectedResponse: "Couldn’t read the usage response · retrying soon"
+        default: title
+        }
+    }
+}
+
+private extension Text {
+    init(markdown: String) {
+        self.init((try? AttributedString(markdown: markdown)) ?? AttributedString(markdown))
     }
 }
 

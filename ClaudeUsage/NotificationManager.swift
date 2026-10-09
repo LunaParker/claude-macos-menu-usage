@@ -13,7 +13,7 @@ import UserNotifications
 
 @Observable
 @MainActor
-final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
+final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, UsageNotifying {
 
     /// The current macOS notification authorization status for this app.
     /// Refreshed each time the Notifications settings tab appears and
@@ -31,6 +31,8 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     func registerAsDelegate() {
         let center = UNUserNotificationCenter.current()
         center.delegate = self
+        // An auth-lost alert left over from a previous run is out of date.
+        center.removeDeliveredNotifications(withIdentifiers: [Self.authLostIdentifier])
 
         let reauthAction = UNNotificationAction(
             identifier: Self.reauthActionIdentifier,
@@ -265,15 +267,13 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     private static let thresholdCategoryIdentifier = "usage-threshold"
     private static let manageUsageActionIdentifier = "manage-usage-action"
 
-    /// Guards one-shot delivery: set after firing, cleared only when
-    /// authentication is restored (successful API response).
+    private static let authLostIdentifier = "auth-lost-notification"
+
+    /// Set after the auth-lost alert fires; cleared when authentication works again.
     private var hasFiredAuthLostNotification = false
 
-    /// Delivers a notification informing the user that authentication
-    /// has been lost. Only fires once per auth-loss event — subsequent
-    /// calls are no-ops until ``authenticationRestored()`` resets the
-    /// flag.
-    func notifyAuthenticationLost() {
+    /// Delivers the auth-lost alert, at most once until `authenticationRestored()`.
+    func authenticationLost() {
         guard !hasFiredAuthLostNotification else { return }
         guard canDeliver else { return }
         hasFiredAuthLostNotification = true
@@ -282,18 +282,22 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         content.body = "Menu Bar Usage for Claude can no longer access your Claude credentials. Tap to reauthenticate."
         content.sound = .default
         content.categoryIdentifier = Self.authLostCategoryIdentifier
-        let request = UNNotificationRequest(
-            identifier: "auth-lost-notification",
-            content: content,
-            trigger: nil
-        )
+        let request = UNNotificationRequest(identifier: Self.authLostIdentifier, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
     }
 
-    /// Resets the one-shot guard so the auth-lost notification can fire
-    /// again the next time authentication is lost. Called by `UsageStore`
-    /// after a successful API response confirms credentials are working.
+    /// Re-arms the auth-lost alert and takes a delivered one out of Notification
+    /// Center, since it no longer describes anything.
     func authenticationRestored() {
+        guard hasFiredAuthLostNotification else { return }
         hasFiredAuthLostNotification = false
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [Self.authLostIdentifier])
     }
+}
+
+/// The notifications `UsageStore` raises.
+protocol UsageNotifying: AnyObject {
+    func authenticationLost()
+    func authenticationRestored()
+    func evaluateThresholds(snapshot: UsageSnapshot)
 }

@@ -10,7 +10,7 @@ import Foundation
 // MARK: - Display snapshot
 
 /// The data the popover actually renders, derived from a `UsageResponse`.
-struct UsageSnapshot: Sendable {
+struct UsageSnapshot: Equatable, Sendable {
     var session: Bar
     var weekly: Bar
     /// The model-scoped weekly quota (currently the Fable limit on Max
@@ -28,7 +28,7 @@ struct UsageSnapshot: Sendable {
         max(session.fraction, weekly.fraction, scopedWeekly?.fraction ?? 0)
     }
 
-    struct Bar: Sendable, Identifiable {
+    struct Bar: Equatable, Sendable, Identifiable {
         let id: Kind
         let title: String
         /// 0…1 fraction used to fill the progress bar.
@@ -47,7 +47,7 @@ struct UsageSnapshot: Sendable {
     /// Everything the Extra Usage card needs to render. Nil when the user
     /// hasn't enabled Extra Usage on their claude.ai account, or when the
     /// API returned an enabled flag but with null numbers.
-    struct ExtraUsageSummary: Sendable {
+    struct ExtraUsageSummary: Equatable, Sendable {
         /// 0…1 fraction of the monthly limit consumed.
         let fraction: Double
         /// Pre-formatted percentage label (e.g. "38%").
@@ -64,7 +64,7 @@ struct UsageSnapshot: Sendable {
 // MARK: - Snapshot builder
 
 extension UsageStore {
-    static func buildSnapshot(from response: UsageResponse) -> UsageSnapshot {
+    static func buildSnapshot(from response: UsageResponse, fetchedAt: Date = Date()) -> UsageSnapshot {
         let session = bar(
             kind: .session,
             title: "Current Session",
@@ -120,7 +120,7 @@ extension UsageStore {
             weekly: weekly,
             scopedWeekly: scopedWeekly,
             extraUsage: extraUsage,
-            fetchedAt: Date()
+            fetchedAt: fetchedAt
         )
     }
 
