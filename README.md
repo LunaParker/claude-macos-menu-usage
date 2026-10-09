@@ -20,15 +20,16 @@ If you're a Claude Pro or Max subscriber and you use Claude Code, you probably w
   - **Fable** — the model-scoped 7-day window (Max 5x/20x plans only; the bar appears whenever the API reports a model-scoped weekly limit and is titled by the API, so it follows any future rename)
 - **Read-only Extra Usage card** — appears automatically when you enable Extra Usage at [claude.ai/settings/usage](https://claude.ai/settings/usage). Shows used vs. monthly cap, credits remaining, and a link back to the web UI for management.
 - **Menu bar gauge icon** with an SF Symbol that tints itself based on peak utilisation (0% / 33% / 67% / 100%), plus an optional text percentage next to the icon for the current session.
-- **Tabbed Settings window** (`General` + `Developer`):
-  - Launch at login (via `SMAppService.mainApp`)
-  - Show session percentage in menu bar
-  - Refresh interval picker (2 / 3 / 4 / 5 minutes, default 5)
-  - Live diagnostic counters: total network requests, last attempt, last success, tracking window, average rate
-  - Live rate-limit cooldown indicator
-  - Force Refresh and Reset Counters actions
+- **Session usage alerts** — optional notifications at 50%, 75% and 90% of the session, each at most once per session window (even across relaunches), plus an optional alert when a session that hit 100% resets.
+- **Claude service status** — an optional row in the popover summarising [status.claude.com](https://status.claude.com) for the services you pick (claude.ai and Claude Code by default), with links to active incidents.
+- **Resilient refreshing** — a network blip keeps the last bars on screen with a note saying why they may be stale, and the app retries within 30 seconds. When Claude Code's token expires, the app has Claude Code refresh it in the background, and only tells you if that doesn't work. Polling pauses while your displays sleep, so the app doesn't wake the network overnight.
+- **Tabbed Settings window** (`General`, `Notifications`, `Developer`):
+  - Launch at login (via `SMAppService.mainApp`), session percentage in the menu bar, refresh interval (2 / 3 / 4 / 5 minutes, default 5), service-status options and the browser web links open in
+  - Usage alert toggles and notification permission
+  - Live diagnostic counters, store state, token-refresh state, the Keychain read method, Force Refresh, a test notification, a simulated outage and a factory reset
+- **Diagnostic log** — a window of timestamped Keychain, API, refresh, status and sleep/wake events, also written to `~/Library/Logs/ClaudeUsage/diagnostic.log` and the unified log (subsystem `com.shyowlstudios.ClaudeUsage`).
 - **First-run onboarding window** — a dedicated Welcome window that explains what the app does before the first Keychain access is attempted.
-- **Live rate-limit countdown** — when the endpoint responds with HTTP 429, the popover shows a real-time "Retrying in 4m 23s" countdown sourced from the store's `rateLimitedUntil` timestamp, with a minimum 60-second cooldown floor to protect the endpoint even if the server returns `Retry-After: 0`.
+- **Live rate-limit countdown** — when the endpoint responds with HTTP 429, the popover shows a real-time "Retrying in 4m 23s" countdown, with a minimum 60-second cooldown floor to protect the endpoint even if the server returns `Retry-After: 0`.
 
 ## Authentication
 
@@ -37,7 +38,8 @@ The app reuses the OAuth credentials that the `claude` CLI already wrote to your
 Specifically:
 
 - **Keychain item.** `kSecClassGenericPassword` with service name `Claude Code-credentials`, created by Claude Code when you first run `claude` → `/login`. The data is a JSON blob containing an OAuth access token, refresh token, expiry, scopes, and subscription tier. The app reads it via `/usr/bin/security find-generic-password` — this binary is already on the keychain item's ACL, so reads succeed silently without triggering a macOS Keychain access prompt. Falls back to `SecItemCopyMatching` (which may prompt) if the CLI approach fails. If the Keychain item is missing entirely, the app reads `~/.claude/.credentials.json`, where Claude Code keeps the same credentials whenever it can't write to the Keychain.
-- **Endpoint.** `GET https://api.anthropic.com/api/oauth/usage`, with headers `Authorization: Bearer <accessToken>` and `anthropic-beta: oauth-2025-04-20`. Returns the session and weekly utilisation windows, a generalised `limits` array (the only source of the model-scoped Fable quota), and the Extra Usage state. This is the same endpoint the `claude` CLI's status line hits.
+- **Endpoint.** `GET https://api.anthropic.com/api/oauth/usage`, with headers `Authorization: Bearer <accessToken>` and `anthropic-beta: oauth-2025-04-20`. Returns the session and weekly utilisation windows, a generalised `limits` array (the only source of the model-scoped Fable quota), and the Extra Usage state. This is the same endpoint the `claude` CLI's status line hits. Requests go through an ephemeral session with no URL cache, so neither the token nor the responses are written to disk.
+- **Token refresh.** When the access token expires, the app runs `claude mcp list` in the background, which makes Claude Code refresh its own token and write the new one to the Keychain. It launches `claude` directly when it can find it, falling back to your login shell. It runs it in a private, empty folder, never in a shared one like `/tmp`.
 - **Sandbox:** Disabled because the app needs to launch `/usr/bin/security` to read keychain items created by Claude Code, and sandboxed apps cannot spawn arbitrary processes. As such, this app can't be published to the App Store.
 - **What the app does not do:** No analytics, no telemetry, no remote logging. Every network request goes directly from your Mac to `api.anthropic.com` over HTTPS. The OAuth token never leaves your machine.
 
@@ -45,23 +47,33 @@ Specifically:
 
 ```
 ClaudeUsage/
-├── ClaudeUsage.xcodeproj/            # Xcode project
-└── ClaudeUsage/                      # Source tree (PBXFileSystemSynchronizedRootGroup)
-    ├── MenuBarUsageForClaudeApp.swift  # @main, scenes, SettingsKeys, WindowIDs, AppReset, MenuBarLabel
-    ├── KeychainCredentials.swift       # /usr/bin/security wrapper for Claude Code-credentials
-    ├── UsageStore.swift                # @Observable store, API client, polling loop, snapshot builder
-    ├── UsagePopoverView.swift          # Menu bar popover: bars, Extra Usage card, rate-limit/error views
-    ├── OnboardingWindowView.swift      # First-run Welcome window
-    ├── SettingsView.swift              # Tabbed settings (General + Developer)
-    └── Assets.xcassets/                # App icon and accent color
+├── ClaudeUsage.xcodeproj/              # Xcode project
+├── ClaudeUsage/                        # App sources (PBXFileSystemSynchronizedRootGroup)
+│   ├── MenuBarUsageForClaudeApp.swift  # @main, scenes, launch-time setup
+│   ├── UsageStore.swift                # Polling, fetch outcomes, background-refresh state machine
+│   ├── UsageState.swift                # Failures, what the popover shows, refresh phases and policy
+│   ├── UsageAPI.swift                  # /api/oauth/usage client and wire format
+│   ├── UsageSnapshot.swift             # Display model and builder
+│   ├── HTTPClient.swift                # Ephemeral session, Retry-After, 429 policy
+│   ├── KeychainCredentials.swift       # Credential reads (security CLI, Security framework, file)
+│   ├── ClaudeCLI.swift                 # Finding and launching `claude` for token refreshes
+│   ├── ThresholdTracker.swift          # Usage-alert decisions
+│   ├── NotificationManager.swift       # macOS notifications
+│   ├── StatusStore.swift               # status.claude.com
+│   ├── DiagnosticLog*.swift            # Diagnostic log and its window
+│   ├── UsagePopoverView.swift          # Menu bar popover
+│   ├── SettingsView.swift              # Settings window
+│   └── …                               # Onboarding, menu bar label, settings keys, helpers
+├── ClaudeUsageTests/                   # Swift Testing suites
+└── scripts/deploy.sh                   # Release build, install to ~/Applications, relaunch
 ```
 
 ### Architecture notes
 
-- **`UsageStore`** is the single source of truth, an `@Observable @MainActor` class that owns the background poll task, the fetch state machine, and all diagnostic counters. Views observe it via `@Environment(UsageStore.self)`.
-- **`MenuBarLabel.task`** is the only place the app starts polling. If `hasCompletedOnboarding` is `false`, it opens the `OnboardingWindowView` instead of touching the Keychain, so the very first `KeychainCredentialStore.load()` call happens only after the user clicks Continue.
-- **Three poll-entry points** — the background loop (`startPolling`), the popover-open debounced refresh (`refreshNow`, 15 s debounce), and manual refresh buttons — all funnel through a single `refresh(minIntervalSinceLastSuccess:)` method with three layers of guards: re-entrancy, debounce, and rate-limit cooldown.
-- **Scenes** — the app declares three SwiftUI scenes: `MenuBarExtra` for the menu bar popover, `Window` for the onboarding flow, and `Settings` for the preferences window. All three receive the `UsageStore` via `.environment(usage)` so they can interact with the same state.
+- **`UsageStore`** is the single source of truth, an `@Observable @MainActor` class that owns the background poll task, the fetch and background-refresh state, and the diagnostic counters. Views observe it via `@Environment(UsageStore.self)`. It takes its collaborators (credential source, fetcher, refresher, notifier, scheduler, display state, clock) as injected dependencies, so the tests drive it with fakes.
+- **`MenuBarLabel.task`** is the only place the app starts polling. If onboarding hasn't been completed, it opens the `OnboardingWindowView` instead of touching the Keychain, so the very first credential read happens only after the user clicks Continue.
+- **One refresh path** — the background loop, popover opens (debounced 60 s), manual refreshes, quick retries, post-refresh checks and display wakes all go through `refresh(trigger:)`, which guards against re-entrancy, display sleep, the debounce and the 429 cooldown.
+- **Scenes** — the app declares four SwiftUI scenes: `MenuBarExtra` for the menu bar popover, `Window`s for the onboarding flow and the diagnostic log, and `Settings` for the preferences window.
 
 ## Build
 
@@ -72,9 +84,9 @@ ClaudeUsage/
 - Claude Code installed and signed in:
   ```sh
   # Install (pick one)
-  npm install -g @anthropic-ai/claude-code
+  curl -fsSL https://claude.ai/install.sh | bash
   # or
-  brew install claude
+  brew install --cask claude-code
 
   # Sign in
   claude
@@ -91,11 +103,19 @@ On first launch after a build:
 
 1. The Welcome window appears explaining what the app does.
 2. Click **Continue**.
-3. The three bars populate and the menu bar icon updates.
+3. The bars populate and the menu bar icon updates.
 
 ### Production deployment
 
-For day-to-day use outside of Xcode, copy the built **`Menu Bar Usage for Claude.app`** into `/Applications`, then launch it from there. This matters for the **Launch at login** feature — `SMAppService.mainApp` registers the current bundle path with LaunchServices, so registering from a DerivedData location causes `.notFound` errors on next login. Running from `/Applications` avoids this entirely. (The app's onboarding flag is hashed against the bundle path, so moving to `/Applications` re-shows the welcome window once.)
+For day-to-day use outside of Xcode, copy the built **`Menu Bar Usage for Claude.app`** into `/Applications` (or `~/Applications`), then launch it from there. This matters for the **Launch at login** feature — `SMAppService.mainApp` registers the current bundle path with LaunchServices, so registering from a DerivedData location causes `.notFound` errors on next login. `scripts/deploy.sh` does the whole round trip: it builds Release into `./build`, quits the running copy, replaces `~/Applications/Menu Bar Usage for Claude.app` and relaunches it.
+
+### Tests
+
+```sh
+xcodebuild -project ClaudeUsage.xcodeproj -scheme ClaudeUsage -configuration Debug -destination 'platform=macOS' test
+```
+
+The tests are hosted in the app, which recognises the test run and skips its launch side effects, so running them leaves an installed copy alone.
 
 ## Alternatives
 
