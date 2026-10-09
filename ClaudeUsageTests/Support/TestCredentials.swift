@@ -6,7 +6,7 @@
 import Foundation
 @testable import ClaudeUsage
 
-enum TestCredentials {
+nonisolated enum TestCredentials {
     static func valid(token: String = "test-token", expiresIn seconds: TimeInterval = 3600) -> ClaudeCredentials {
         ClaudeCredentials(
             accessToken: token,

@@ -68,6 +68,7 @@ final class UsageStore {
 
     let notificationManager = NotificationManager()
     private let client = UsageAPIClient()
+    private let credentialSource: CredentialSource = KeychainCredentialSource()
     private var pollTask: Task<Void, Never>?
 
     /// In-memory credential cache. Reading credentials launches a
@@ -107,16 +108,16 @@ final class UsageStore {
     /// Returns cached credentials when they're still valid, otherwise
     /// reads fresh credentials from the Keychain (which may trigger a
     /// macOS authorization prompt).
-    private func loadCredentials() throws -> ClaudeCredentials {
+    private func loadCredentials() async throws -> ClaudeCredentials {
         if let cached = cachedCredentials, !cached.isExpired {
             DiagnosticLog.shared.log(.keychain, "Using cached credentials")
             return cached
         }
         DiagnosticLog.shared.log(.keychain, "Cache miss, loading from Keychain")
-        let fresh = try KeychainCredentialStore.load()
-        cachedCredentials = fresh
-        keychainReadMethod = KeychainCredentialStore.lastReadMethod
-        return fresh
+        let fresh = try await credentialSource.load()
+        cachedCredentials = fresh.credentials
+        keychainReadMethod = fresh.method
+        return fresh.credentials
     }
 
     // MARK: Lifecycle
@@ -264,7 +265,7 @@ final class UsageStore {
 
         let credentials: ClaudeCredentials
         do {
-            credentials = try loadCredentials()
+            credentials = try await loadCredentials()
         } catch KeychainError.itemNotFound {
             cachedCredentials = nil
             state = .missingCredentials
@@ -353,7 +354,7 @@ final class UsageStore {
             DiagnosticLog.shared.log(.api, "HTTP 401/403 — token rejected")
             cachedCredentials = nil
             if retryOnRotation,
-               let rotated = Self.rotatedCredentials(replacing: credentials, reloaded: try? loadCredentials()) {
+               let rotated = Self.rotatedCredentials(replacing: credentials, reloaded: try? await loadCredentials()) {
                 DiagnosticLog.shared.log(.keychain, "Keychain holds a newer token — retrying silently")
                 await fetchUsage(using: rotated, retryOnRotation: false)
                 return
