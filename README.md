@@ -18,6 +18,7 @@ If you're a Claude Pro or Max subscriber and you use Claude Code, you probably w
   - **Current Session** — the 5-hour rolling window
   - **Weekly Limit** — the 7-day rolling all-models window
   - **Fable** — the model-scoped 7-day window (Max 5x/20x plans only; the bar appears whenever the API reports a model-scoped weekly limit and is titled by the API, so it follows any future rename)
+- **Pace marker** — a tick on each bar shows how much of its window has passed, and the caption says "On pace" or when you'd hit 100% at your current rate, so a mid-week 50% reads as fine or as a warning.
 - **Read-only Extra Usage card** — appears automatically when you enable Extra Usage at [claude.ai/settings/usage](https://claude.ai/settings/usage). Shows used vs. monthly cap, credits remaining, and a link back to the web UI for management.
 - **Menu bar gauge icon** with an SF Symbol that tints itself based on peak utilisation (0% / 33% / 67% / 100%), plus an optional text percentage next to the icon for the current session.
 - **Usage alerts** — optional notifications at 50%, 75% and 90% of the session, the weekly limit and the Fable weekly limit, each at most once per window per quota (even across relaunches) and saying when that quota resets, plus an optional alert when a quota that hit 100% resets.
@@ -54,6 +55,7 @@ ClaudeUsage/
 │   ├── UsageState.swift                # Failures, what the popover shows, refresh phases and policy
 │   ├── UsageAPI.swift                  # /api/oauth/usage client and wire format
 │   ├── UsageSnapshot.swift             # Display model and builder
+│   ├── UsagePace.swift                 # Elapsed window share and projection per bar
 │   ├── HTTPClient.swift                # Ephemeral session, Retry-After, 429 policy
 │   ├── KeychainCredentials.swift       # Credential reads (security CLI, Security framework, file)
 │   ├── ClaudeCLI.swift                 # Finding and launching `claude` for token refreshes
