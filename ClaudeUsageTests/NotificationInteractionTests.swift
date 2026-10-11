@@ -78,7 +78,7 @@ struct NotificationInteractionTests {
 
     @Test("performing .reauthenticate invokes the store-wired handler exactly once")
     func reauthenticateInvokesHandler() {
-        let manager = NotificationManager()
+        let manager = NotificationManager(defaults: TestDefaults.make())
         var calls = 0
         manager.reauthenticateHandler = { calls += 1 }
 
@@ -89,7 +89,7 @@ struct NotificationInteractionTests {
 
     @Test("performing .reauthenticate before a handler is wired is a no-op")
     func reauthenticateWithoutHandlerIsSafe() {
-        let manager = NotificationManager()
+        let manager = NotificationManager(defaults: TestDefaults.make())
 
         manager.perform(.reauthenticate)
 

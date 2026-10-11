@@ -2,9 +2,9 @@
 //  ThresholdTracker.swift
 //  Menu Bar Usage for Claude
 //
-//  Decides which session-usage alerts are due. NotificationManager delivers
-//  them and saves the tracker after each change, so a relaunch in the same
-//  window doesn't repeat an alert.
+//  Decides which alerts are due for one quota's window. UsageAlerts keeps one
+//  per quota and NotificationManager saves them after each change, so a
+//  relaunch in the same window doesn't repeat an alert.
 //
 
 import Foundation
@@ -48,10 +48,11 @@ nonisolated struct ThresholdTracker: Codable, Equatable, Sendable {
         }
 
         guard canDeliver else { return events }
-        for percent in Self.percents
-        where fraction >= Double(percent) / 100 && enabled.contains(percent) && !fired.contains(percent) {
-            fired.insert(percent)
-            events.append(.crossed(percent: percent))
+        // One reading, one alert: the highest threshold due supersedes the rest.
+        let due = Self.percents.filter { fraction >= Double($0) / 100 && enabled.contains($0) && !fired.contains($0) }
+        fired.formUnion(due)
+        if let highest = due.last {
+            events.append(.crossed(percent: highest))
         }
         return events
     }
@@ -63,20 +64,6 @@ nonisolated struct ThresholdTracker: Codable, Equatable, Sendable {
         case (nil, nil): return true
         case (nil, _), (_, nil): return false
         case (let a?, let b?): return abs(a.timeIntervalSince1970 - b.timeIntervalSince1970) < 2
-        }
-    }
-}
-
-extension ThresholdTracker {
-    private static let storageKey = "sessionAlertTracker"
-
-    static func load(from defaults: UserDefaults) -> ThresholdTracker? {
-        defaults.data(forKey: storageKey).flatMap { try? JSONDecoder().decode(ThresholdTracker.self, from: $0) }
-    }
-
-    func save(to defaults: UserDefaults) {
-        if let data = try? JSONEncoder().encode(self) {
-            defaults.set(data, forKey: Self.storageKey)
         }
     }
 }

@@ -10,7 +10,7 @@ import Foundation
 // MARK: - Display snapshot
 
 /// The data the popover actually renders, derived from a `UsageResponse`.
-struct UsageSnapshot: Equatable, Sendable {
+nonisolated struct UsageSnapshot: Equatable, Sendable {
     var session: Bar
     var weekly: Bar
     /// The model-scoped weekly quota (currently the Fable limit on Max
@@ -28,6 +28,11 @@ struct UsageSnapshot: Equatable, Sendable {
         max(session.fraction, weekly.fraction, scopedWeekly?.fraction ?? 0)
     }
 
+    /// The quota bars in display order; the model-scoped one only when present.
+    var bars: [Bar] {
+        [session, weekly] + (scopedWeekly.map { [$0] } ?? [])
+    }
+
     struct Bar: Equatable, Sendable, Identifiable {
         let id: Kind
         let title: String
@@ -37,7 +42,7 @@ struct UsageSnapshot: Equatable, Sendable {
         let percentLabel: String
         let resetsAt: Date?
 
-        enum Kind: String, Sendable {
+        enum Kind: String, Sendable, CaseIterable {
             case session
             case weekly
             case scopedWeekly

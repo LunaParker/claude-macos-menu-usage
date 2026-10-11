@@ -2,8 +2,8 @@
 //  NotificationManager.swift
 //  Menu Bar Usage for Claude
 //
-//  Delivers the app's macOS notifications: session usage alerts (decided by
-//  ThresholdTracker), the authentication-lost alert and the test banner.
+//  Delivers the app's macOS notifications: usage alerts (decided by
+//  UsageAlerts), the authentication-lost alert and the test banner.
 //
 
 import AppKit
@@ -134,11 +134,11 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, Usa
     // MARK: - Threshold tracking
 
     @ObservationIgnored private let defaults: UserDefaults
-    @ObservationIgnored private var sessionAlerts: ThresholdTracker
+    @ObservationIgnored private var alerts: UsageAlerts
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        sessionAlerts = ThresholdTracker.load(from: defaults) ?? ThresholdTracker()
+        alerts = UsageAlerts.load(from: defaults)
         super.init()
     }
 
@@ -170,32 +170,31 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, Usa
 
     // MARK: - Evaluation
 
-    private static let thresholdSettings = [
-        50: SettingsKeys.notifyAt50Percent,
-        75: SettingsKeys.notifyAt75Percent,
-        90: SettingsKeys.notifyAt90Percent,
-    ]
-
     private var canDeliver: Bool {
         authorizationStatus == .authorized || authorizationStatus == .provisional
     }
 
-    /// Called after each successful usage fetch. Delivers the session alerts
-    /// the tracker says are due and saves the tracker when it changes.
+    /// Called after each successful usage fetch. Delivers the alerts due for
+    /// every quota and saves the trackers when they change.
     func evaluateThresholds(snapshot: UsageSnapshot) {
-        let before = sessionAlerts
-        let events = sessionAlerts.evaluate(
-            fraction: snapshot.session.fraction,
-            resetsAt: snapshot.session.resetsAt,
-            enabled: Set(Self.thresholdSettings.filter { defaults[$0.value] }.keys),
-            resetAlertEnabled: defaults[SettingsKeys.notifyOnReset],
+        let before = alerts
+        let due = alerts.evaluate(
+            snapshot: snapshot,
+            preferences: UsageAlerts.Preferences(defaults: defaults),
             canDeliver: canDeliver
         )
-        if sessionAlerts != before {
-            sessionAlerts.save(to: defaults)
+        if alerts != before {
+            alerts.save(to: defaults)
         }
-        for event in events {
-            deliver(event)
+        let now = Date()
+        for alert in due {
+            let message = alert.message(now: now)
+            deliverNotification(
+                title: message.title,
+                body: message.body,
+                identifier: message.identifier,
+                categoryIdentifier: alert.event == .windowReset ? nil : Self.thresholdCategoryIdentifier
+            )
         }
     }
 
@@ -214,24 +213,6 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, Usa
     }
 
     // MARK: - Private helpers
-
-    private func deliver(_ event: ThresholdTracker.Event) {
-        switch event {
-        case .crossed(let percent):
-            deliverNotification(
-                title: "Claude Usage Alert",
-                body: "Your current session usage has reached \(percent)%.",
-                identifier: "usage-threshold-\(percent)",
-                categoryIdentifier: Self.thresholdCategoryIdentifier
-            )
-        case .windowReset:
-            deliverNotification(
-                title: "Claude Usage Reset",
-                body: "Your session usage limit has reset. You're good to go!",
-                identifier: "usage-reset"
-            )
-        }
-    }
 
     private func deliverNotification(
         title: String,

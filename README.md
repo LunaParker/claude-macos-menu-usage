@@ -20,12 +20,12 @@ If you're a Claude Pro or Max subscriber and you use Claude Code, you probably w
   - **Fable** — the model-scoped 7-day window (Max 5x/20x plans only; the bar appears whenever the API reports a model-scoped weekly limit and is titled by the API, so it follows any future rename)
 - **Read-only Extra Usage card** — appears automatically when you enable Extra Usage at [claude.ai/settings/usage](https://claude.ai/settings/usage). Shows used vs. monthly cap, credits remaining, and a link back to the web UI for management.
 - **Menu bar gauge icon** with an SF Symbol that tints itself based on peak utilisation (0% / 33% / 67% / 100%), plus an optional text percentage next to the icon for the current session.
-- **Session usage alerts** — optional notifications at 50%, 75% and 90% of the session, each at most once per session window (even across relaunches), plus an optional alert when a session that hit 100% resets.
+- **Usage alerts** — optional notifications at 50%, 75% and 90% of the session, the weekly limit and the Fable weekly limit, each at most once per window per quota (even across relaunches) and saying when that quota resets, plus an optional alert when a quota that hit 100% resets.
 - **Claude service status** — an optional row in the popover summarising [status.claude.com](https://status.claude.com) for the services you pick (claude.ai and Claude Code by default), with links to active incidents.
 - **Resilient refreshing** — a network blip keeps the last bars on screen with a note saying why they may be stale, and the app retries within 30 seconds. When Claude Code's token expires, the app has Claude Code refresh it in the background, and only tells you if that doesn't work. Polling pauses while your displays sleep, so the app doesn't wake the network overnight.
 - **Tabbed Settings window** (`General`, `Notifications`, `Developer`):
   - Launch at login (via `SMAppService.mainApp`), session percentage in the menu bar, refresh interval (2 / 3 / 4 / 5 minutes, default 5), service-status options and the browser web links open in
-  - Usage alert toggles and notification permission
+  - Usage alert thresholds, which quotas they watch, and notification permission
   - Live diagnostic counters, store state, token-refresh state, the Keychain read method, Force Refresh, a test notification, a simulated outage and a factory reset
 - **Diagnostic log** — a window of timestamped Keychain, API, refresh, status and sleep/wake events, also written to `~/Library/Logs/ClaudeUsage/diagnostic.log` and the unified log (subsystem `com.shyowlstudios.ClaudeUsage`).
 - **First-run onboarding window** — a dedicated Welcome window that explains what the app does before the first Keychain access is attempted.
@@ -57,7 +57,8 @@ ClaudeUsage/
 │   ├── HTTPClient.swift                # Ephemeral session, Retry-After, 429 policy
 │   ├── KeychainCredentials.swift       # Credential reads (security CLI, Security framework, file)
 │   ├── ClaudeCLI.swift                 # Finding and launching `claude` for token refreshes
-│   ├── ThresholdTracker.swift          # Usage-alert decisions
+│   ├── ThresholdTracker.swift          # Alert decisions for one quota's window
+│   ├── UsageAlerts.swift               # One tracker per quota, alert wording
 │   ├── NotificationManager.swift       # macOS notifications
 │   ├── StatusStore.swift               # status.claude.com
 │   ├── DiagnosticLog*.swift            # Diagnostic log and its window

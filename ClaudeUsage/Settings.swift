@@ -28,6 +28,10 @@ nonisolated enum SettingsKeys {
     static let notifyAt75Percent = SettingKey(name: "notifyAt75Percent", defaultValue: false)
     static let notifyAt90Percent = SettingKey(name: "notifyAt90Percent", defaultValue: false)
     static let notifyOnReset = SettingKey(name: "notifyOnReset", defaultValue: false)
+    /// Which quotas the thresholds above apply to.
+    static let notifyForSession = SettingKey(name: "notifyForSession", defaultValue: true)
+    static let notifyForWeekly = SettingKey(name: "notifyForWeekly", defaultValue: true)
+    static let notifyForScopedWeekly = SettingKey(name: "notifyForScopedWeekly", defaultValue: true)
 
     /// Bundle id of the browser for web links; empty means the system default.
     static let preferredBrowserBundleID = SettingKey(name: "preferredBrowserBundleID", defaultValue: "")
@@ -73,6 +77,12 @@ nonisolated enum PreferenceMigrations {
 
         // The Sonnet bar and its setting were removed when Sonnet stopped being a separate quota.
         defaults.removeObject(forKey: "hideSonnetBarWhenZero")
+
+        // Alert state was a single session tracker before the weekly and model-scoped alerts.
+        if let session = defaults.data(forKey: "sessionAlertTracker") {
+            defaults.set(session, forKey: UsageAlerts.storageKey(for: .session))
+            defaults.removeObject(forKey: "sessionAlertTracker")
+        }
     }
 }
 
