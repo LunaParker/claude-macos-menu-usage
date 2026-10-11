@@ -19,7 +19,8 @@ nonisolated struct SettingKey<Value: Sendable>: Sendable {
 /// these keys, so a default is written exactly once.
 nonisolated enum SettingsKeys {
     static let hasCompletedOnboarding = SettingKey(name: "hasCompletedOnboarding", defaultValue: false)
-    static let showSessionPercentInMenuBar = SettingKey(name: "showSessionPercentInMenuBar", defaultValue: false)
+    /// Which quota's percentage sits beside the menu bar gauge.
+    static let menuBarMetric = SettingKey(name: "menuBarMetric", defaultValue: MenuBarMetric.off)
     /// The elapsed-window tick and on-pace verdict on each quota bar.
     static let showPaceOnBars = SettingKey(name: "showPaceOnBars", defaultValue: true)
     /// Seconds between background polls. `UsageStore` falls back to the default
@@ -50,6 +51,10 @@ extension UserDefaults {
     nonisolated subscript<Value>(key: SettingKey<Value>) -> Value {
         object(forKey: key.name) as? Value ?? key.defaultValue
     }
+
+    nonisolated subscript<Value: RawRepresentable>(key: SettingKey<Value>) -> Value where Value.RawValue == String {
+        string(forKey: key.name).flatMap(Value.init(rawValue:)) ?? key.defaultValue
+    }
 }
 
 extension AppStorage {
@@ -62,6 +67,10 @@ extension AppStorage {
     }
 
     init(_ key: SettingKey<String>, store: UserDefaults? = nil) where Value == String {
+        self.init(wrappedValue: key.defaultValue, key.name, store: store)
+    }
+
+    init(_ key: SettingKey<Value>, store: UserDefaults? = nil) where Value: RawRepresentable, Value.RawValue == String {
         self.init(wrappedValue: key.defaultValue, key.name, store: store)
     }
 }
@@ -79,6 +88,14 @@ nonisolated enum PreferenceMigrations {
 
         // The Sonnet bar and its setting were removed when Sonnet stopped being a separate quota.
         defaults.removeObject(forKey: "hideSonnetBarWhenZero")
+
+        // The menu bar percentage was a session-only switch before the metric picker.
+        if let showSession = defaults.object(forKey: "showSessionPercentInMenuBar") as? Bool {
+            if showSession, defaults.string(forKey: SettingsKeys.menuBarMetric.name) == nil {
+                defaults.set(MenuBarMetric.session.rawValue, forKey: SettingsKeys.menuBarMetric.name)
+            }
+            defaults.removeObject(forKey: "showSessionPercentInMenuBar")
+        }
 
         // Alert state was a single session tracker before the weekly and model-scoped alerts.
         if let session = defaults.data(forKey: "sessionAlertTracker") {

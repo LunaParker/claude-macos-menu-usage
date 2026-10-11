@@ -38,8 +38,8 @@ struct SettingsView: View {
 // MARK: - General
 
 private struct GeneralSettingsView: View {
-    @AppStorage(SettingsKeys.showSessionPercentInMenuBar)
-    private var showSessionPercent: Bool
+    @AppStorage(SettingsKeys.menuBarMetric)
+    private var menuBarMetric: MenuBarMetric
 
     @AppStorage(SettingsKeys.showPaceOnBars)
     private var showPaceOnBars: Bool
@@ -94,14 +94,22 @@ private struct GeneralSettingsView: View {
             }
 
             Section {
-                Toggle(isOn: $showSessionPercent) {
+                Picker(selection: $menuBarMetric) {
+                    Text("Off").tag(MenuBarMetric.off)
+                    Text("Highest quota").tag(MenuBarMetric.highest)
+                    Text("Current session").tag(MenuBarMetric.session)
+                    Text("Weekly limit").tag(MenuBarMetric.weekly)
+                    Text("Model weekly limit").tag(MenuBarMetric.scopedWeekly)
+                } label: {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Show session usage in menu bar")
-                        Text("Display the current session percentage next to the gauge icon.")
+                        Text("Show in menu bar")
+                        Text("A percentage next to the gauge icon. While any quota is used up, the time until it resets is shown instead, whatever you pick here.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
+                .pickerStyle(.menu)
             } header: {
                 Text("Menu Bar")
             }
