@@ -75,6 +75,52 @@ struct BuildSnapshotTests {
         #expect(snapshot.scopedWeekly?.fraction == 0.30)
     }
 
+    @Test("the limits array takes precedence over the legacy windows")
+    func limitsArrayWins() {
+        let sessionReset = Date(timeIntervalSince1970: 1_800_000_000)
+        let weeklyReset = Date(timeIntervalSince1970: 1_800_100_000)
+        let response = makeResponse(
+            fiveHour: .init(utilization: 10, resetsAt: nil),
+            sevenDay: .init(utilization: 20, resetsAt: nil),
+            limits: [
+                LimitEntry(kind: "session", percent: 61, resetsAt: sessionReset, scope: nil),
+                LimitEntry(kind: "weekly_all", percent: 59, resetsAt: weeklyReset, scope: nil),
+            ]
+        )
+        let snapshot = UsageStore.buildSnapshot(from: response)
+
+        #expect(snapshot.session.fraction == 0.61)
+        #expect(snapshot.session.resetsAt == sessionReset)
+        #expect(snapshot.weekly.fraction == 0.59)
+        #expect(snapshot.weekly.resetsAt == weeklyReset)
+    }
+
+    @Test("a bar missing from the array falls back to its legacy window")
+    func perBarFallback() {
+        let response = makeResponse(
+            fiveHour: .init(utilization: 10, resetsAt: nil),
+            sevenDay: .init(utilization: 20, resetsAt: nil),
+            limits: [fableLimit()]
+        )
+        let snapshot = UsageStore.buildSnapshot(from: response)
+
+        #expect(snapshot.session.fraction == 0.10)
+        #expect(snapshot.weekly.fraction == 0.20)
+        #expect(snapshot.scopedWeekly?.title == "Fable")
+    }
+
+    @Test("with several model-scoped entries, the fullest one is shown")
+    func fullestScopedEntryWins() {
+        let response = makeResponse(limits: [
+            fableLimit(percent: 42),
+            LimitEntry(kind: "weekly_scoped", percent: 70, resetsAt: nil, scope: .init(model: .init(displayName: "Haiku"))),
+        ])
+        let snapshot = UsageStore.buildSnapshot(from: response)
+
+        #expect(snapshot.scopedWeekly?.title == "Haiku")
+        #expect(snapshot.scopedWeekly?.fraction == 0.70)
+    }
+
     @Test("scoped weekly bar hidden when the limits array is absent")
     func scopedWeeklyHiddenWithoutLimits() {
         let snapshot = UsageStore.buildSnapshot(from: makeResponse())

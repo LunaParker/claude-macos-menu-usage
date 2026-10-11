@@ -39,6 +39,33 @@ struct UsageAPIClientTests {
         #expect(response.fiveHour?.utilization == 42)
     }
 
+    @Test("a malformed limits entry is skipped, not fatal")
+    func lenientLimitsArray() async throws {
+        let (client, _) = makeClient(status: 200, body: """
+        {"five_hour": null, "seven_day": null, "limits": [
+          {"kind": "session", "percent": 61, "resets_at": null, "scope": null},
+          {"kind": "weekly_all", "percent": "lots", "resets_at": null, "scope": null},
+          {"kind": "weekly_scoped", "percent": 42, "resets_at": null, "scope": {"model": {"display_name": "Fable"}}}
+        ]}
+        """)
+
+        let response = try await client.fetch(accessToken: "tok")
+
+        #expect(response.limits?.map(\.kind) == ["session", "weekly_scoped"])
+        #expect(response.droppedLimitEntries == 1)
+    }
+
+    @Test("keeps the body of the latest successful response")
+    func keepsLastBody() async throws {
+        let body = #"{"five_hour": {"utilization": 1, "resets_at": null}, "seven_day": null}"#
+        let (client, _) = makeClient(status: 200, body: body)
+        #expect(client.lastResponseBody == nil)
+
+        _ = try await client.fetch(accessToken: "tok")
+
+        #expect(client.lastResponseBody == Data(body.utf8))
+    }
+
     @Test("401 and 403 both mean the token was rejected", arguments: [401, 403])
     func rejectedToken(status: Int) async {
         let (client, _) = makeClient(status: status, body: "")

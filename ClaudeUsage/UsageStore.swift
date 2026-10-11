@@ -208,6 +208,9 @@ final class UsageStore {
         }
     }
 
+    /// The latest raw response, for the Developer tab's Copy button.
+    var lastResponseBody: Data? { dependencies.fetcher.lastResponseBody }
+
     // MARK: App Intents
 
     /// What the App Intents ask for: the data on hand, fetched first when there

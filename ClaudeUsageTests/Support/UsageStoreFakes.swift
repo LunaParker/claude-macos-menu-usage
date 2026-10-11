@@ -41,6 +41,7 @@ final class FakeFetcher: UsageFetching {
     var responses: [Result<UsageResponse, UsageAPIError>] = [.success(.sample())]
     /// How long each fetch stays in flight, for tests that need to observe one.
     var delay: Duration = .zero
+    var lastResponseBody: Data?
     private(set) var tokens: [String] = []
 
     func fetch(accessToken: String) async throws -> UsageResponse {

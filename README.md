@@ -28,7 +28,7 @@ If you're a Claude Pro or Max subscriber and you use Claude Code, you probably w
 - **Tabbed Settings window** (`General`, `Notifications`, `Developer`):
   - Launch at login (via `SMAppService.mainApp`), which quota the menu bar shows, the pace marker, refresh interval (2 / 3 / 4 / 5 minutes, default 5), service-status options and the browser web links open in
   - Usage alert thresholds, which quotas they watch, and notification permission
-  - Live diagnostic counters, store state, token-refresh state, the Keychain read method, Force Refresh, a test notification, a simulated outage and a factory reset
+  - Live diagnostic counters, store state, token-refresh state, the Keychain read method, Copy Last Response (the raw usage JSON), Force Refresh, a test notification, a simulated outage and a factory reset
 - **Diagnostic log** — a window of timestamped Keychain, API, refresh, status and sleep/wake events, also written to `~/Library/Logs/ClaudeUsage/diagnostic.log` and the unified log (subsystem `com.shyowlstudios.ClaudeUsage`).
 - **First-run onboarding window** — a dedicated Welcome window that explains what the app does before the first Keychain access is attempted.
 - **Live rate-limit countdown** — when the endpoint responds with HTTP 429, the popover shows a real-time "Retrying in 4m 23s" countdown, with a minimum 60-second cooldown floor to protect the endpoint even if the server returns `Retry-After: 0`.
