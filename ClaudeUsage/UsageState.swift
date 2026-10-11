@@ -9,7 +9,7 @@
 import Foundation
 
 /// Why the latest refresh didn't produce fresh usage.
-enum UsageFailure: Equatable, Sendable {
+nonisolated enum UsageFailure: Equatable, Sendable {
     /// No credentials in the Keychain or ~/.claude/.credentials.json.
     case signedOut
     /// The credentials exist but couldn't be read or decoded.
@@ -34,6 +34,63 @@ enum UsageFailure: Equatable, Sendable {
             false
         }
     }
+}
+
+nonisolated extension UsageFailure {
+    var title: String {
+        switch self {
+        case .signedOut: "Claude Code not authenticated"
+        case .credentialsUnreadable: "Couldn’t read your Claude Code credentials"
+        case .refreshingSignIn: "Refreshing Claude Code’s sign-in"
+        case .signInExpired: "Claude Code needs you to sign in again"
+        case .claudeNotFound: "Couldn’t find the claude command"
+        case .rateLimited: "Rate-limited by Claude"
+        case .offline: "Couldn’t reach Claude"
+        case .server(let status): "Claude’s usage endpoint returned HTTP \(status)"
+        case .unexpectedResponse: "Couldn’t read Claude’s usage response"
+        }
+    }
+
+    /// Markdown.
+    var detail: String {
+        switch self {
+        case .signedOut:
+            "No credentials in the Keychain or `~/.claude/.credentials.json`."
+        case .credentialsUnreadable(let reason):
+            reason
+        case .refreshingSignIn:
+            "The token expired, so Claude Code is refreshing it in the background. This usually takes a few seconds."
+        case .signInExpired:
+            "The background token refresh didn’t work. Run `claude` in Terminal and type `/login`, then try again."
+        case .claudeNotFound:
+            "The background token refresh needs Claude Code. Install it, or make sure `claude` is on your login shell’s PATH, then try again."
+        case .rateLimited:
+            "Claude’s usage endpoint is rate-limiting this app."
+        case .offline(let reason):
+            reason
+        case .server:
+            "This is usually temporary. The app will try again shortly."
+        case .unexpectedResponse:
+            "The endpoint may have changed. The app will keep trying."
+        }
+    }
+
+    var notice: String {
+        switch self {
+        case .refreshingSignIn: "Refreshing Claude Code’s sign-in…"
+        case .offline: "Couldn’t reach Claude · retrying soon"
+        case .server(let status): "Usage endpoint returned HTTP \(status) · retrying soon"
+        case .unexpectedResponse: "Couldn’t read the usage response · retrying soon"
+        default: title
+        }
+    }
+}
+
+/// Why an App Intent couldn't answer. Shortcuts shows the text.
+nonisolated enum UsageRequestError: Error, Equatable {
+    case notSetUp
+    case unavailable(UsageFailure)
+    case noData
 }
 
 /// What the popover shows for a snapshot and failure.
