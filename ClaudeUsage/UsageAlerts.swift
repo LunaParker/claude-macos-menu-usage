@@ -157,16 +157,25 @@ nonisolated extension UsageAlerts.Alert {
     }
 }
 
-/// "at 6:00 AM" within a day, "Thursday at 3:00 PM" beyond: the weekly limit
-/// resets days out. Nil once the reset has passed.
+/// "at 6:00 AM" today, "tomorrow at 2:00 AM", "Thursday at 3:00 PM" beyond:
+/// decided by calendar day, so a reset 23 hours away isn't given as a bare
+/// time that reads as already past. Nil once the reset has passed.
 nonisolated enum ResetWording {
     static func phrase(for resetsAt: Date, now: Date, locale: Locale, timeZone: TimeZone) -> String? {
         guard resetsAt > now else { return nil }
         let style = Date.FormatStyle(locale: locale, timeZone: timeZone)
         let time = resetsAt.formatted(style.hour().minute())
-        if resetsAt.timeIntervalSince(now) < 24 * 3600 {
-            return "at \(time)"
+        switch daysAhead(of: resetsAt, from: now, timeZone: timeZone) {
+        case 0: return "at \(time)"
+        case 1: return "tomorrow at \(time)"
+        default: return "\(resetsAt.formatted(style.weekday(.wide))) at \(time)"
         }
-        return "\(resetsAt.formatted(style.weekday(.wide))) at \(time)"
+    }
+
+    /// Calendar days between `now` and `date` in `timeZone`: 0 today, 1 tomorrow.
+    static func daysAhead(of date: Date, from now: Date, timeZone: TimeZone) -> Int {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        return calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: date)).day ?? 0
     }
 }

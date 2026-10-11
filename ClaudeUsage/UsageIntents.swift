@@ -129,7 +129,8 @@ nonisolated extension UsageRequestError: CustomLocalizedStringResourceConvertibl
         case .notSetUp:
             "Finish setting up Menu Bar Usage for Claude first."
         case .unavailable(let failure):
-            "\(failure.title). \(failure.detail)"
+            // `detail` is Markdown for the popover; Shortcuts shows it as plain text.
+            "\(failure.title). \(failure.detail.replacingOccurrences(of: "`", with: ""))"
         case .noData:
             "No usage data yet."
         }

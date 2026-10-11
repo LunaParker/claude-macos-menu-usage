@@ -130,7 +130,18 @@ struct MenuBarContentTests {
         let warned = MenuBarContent(snapshot: .snapshot(session: 0.55, weekly: 0.95), metric: .off, now: now)
         #expect(warned.accessibilityLabel == "Menu Bar Usage for Claude, Weekly Limit above 90%")
 
+        let shownAndWarned = MenuBarContent(snapshot: .snapshot(session: 0.55, weekly: 0.95), metric: .session, now: now)
+        #expect(shownAndWarned.accessibilityLabel == "Menu Bar Usage for Claude, Current Session 55%, Weekly Limit above 90%")
+
         let locked = MenuBarContent(snapshot: .snapshot(session: 1.0, sessionResetsAt: now.addingTimeInterval(72 * 60)), metric: .off, now: now)
-        #expect(locked.accessibilityLabel == "Menu Bar Usage for Claude, Current Session used up, resets in 1:12")
+        #expect(locked.accessibilityLabel == "Menu Bar Usage for Claude, Current Session used up, resets in 1 hour 12 minutes")
+    }
+
+    @Test("VoiceOver hears the countdown in words", arguments: [
+        (30.0, "1 minute"), (2_700.0, "45 minutes"), (4_320.0, "1 hour 12 minutes"), (7_200.0, "2 hours"),
+        (172_800.0, "2 days"), (183_600.0, "2 days 3 hours"),
+    ])
+    func spokenCountdown(seconds: TimeInterval, words: String) {
+        #expect(MenuBarContent.spokenCountdown(until: now.addingTimeInterval(seconds), from: now) == words)
     }
 }

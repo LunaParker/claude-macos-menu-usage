@@ -41,7 +41,8 @@ struct MenuBarLabel: View {
             if let text = content.text {
                 Text(text)
                     .monospacedDigit()
-            } else if content.showsWarning {
+            }
+            if content.showsWarning {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
             }

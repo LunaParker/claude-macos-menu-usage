@@ -191,6 +191,14 @@ struct AlertTextTests {
         #expect(message.identifier == "usage-threshold-scopedWeekly-90")
     }
 
+    @Test("a reset tomorrow says so, even within 24 hours")
+    func tomorrowCrossing() {
+        // Friday 03:00 Toronto; 23 hours later is Saturday 02:00.
+        let message = message(.weekly, "Weekly Limit", 0.90, TestSnapshots.now.addingTimeInterval(23 * 3600), .crossed(percent: 90))
+
+        #expect(message.body == "Your weekly usage has reached 90%. Resets tomorrow at 2:00\u{202F}AM.")
+    }
+
     @Test("without a reset time the body stops at the percentage")
     func noResetTime() {
         let message = message(.weekly, "Weekly Limit", 0.90, nil, .crossed(percent: 90))

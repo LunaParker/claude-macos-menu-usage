@@ -54,5 +54,17 @@ struct ClaudeUsageEntityTests {
         let plain = UsageSnapshot.snapshot(session: 0.55, sessionResetsAt: nil, weekly: 0.3)
         #expect(ClaudeUsageEntity.summary(of: plain, now: TestSnapshots.now, locale: locale, timeZone: timeZone)
                 == "Session 55%. Weekly 30%, resets Monday at 3:00\u{202F}AM.")
+
+        let tomorrow = UsageSnapshot.snapshot(session: 0.55, sessionResetsAt: TestSnapshots.now.addingTimeInterval(23 * 3600), weekly: 0.3)
+        #expect(ClaudeUsageEntity.summary(of: tomorrow, now: TestSnapshots.now, locale: locale, timeZone: timeZone)
+                == "Session 55%, resets tomorrow at 2:00\u{202F}AM. Weekly 30%, resets Monday at 3:00\u{202F}AM.")
+    }
+
+    @Test("the Shortcuts error text is plain, with no Markdown")
+    func errorTextIsPlain() {
+        let text = String(localized: UsageRequestError.unavailable(.signInExpired(nextAttempt: nil)).localizedStringResource)
+
+        #expect(text.hasPrefix("Claude Code needs you to sign in again. "))
+        #expect(!text.contains("`"))
     }
 }

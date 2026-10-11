@@ -48,6 +48,8 @@ final class UsageStore {
         case retry
         /// A background `claude` refresh just exited.
         case postRefresh
+        /// An App Intent asked; like `.manual`, but skipped while the displays sleep.
+        case intent
         /// The displays woke; debounced like `.popover`.
         case wake
     }
@@ -216,10 +218,11 @@ final class UsageStore {
             if isRefreshing {
                 await waitForRefresh()
             } else {
-                await refresh(trigger: .manual)
+                await refresh(trigger: .intent)
             }
         }
-        if let snapshot { return snapshot }
+        // Like the popover: data on hand is withheld once only the user can fix things.
+        if let snapshot, !(failure?.needsUser ?? false) { return snapshot }
         if let failure { throw .unavailable(failure) }
         throw .noData
     }
@@ -333,11 +336,19 @@ final class UsageStore {
             }
             handleUnusableToken()
         } catch UsageAPIError.transport(let error) {
+            // The caller's task was cancelled (a poll-interval change, a stopped
+            // Shortcut): nothing about the network failed.
+            if (error as? URLError)?.code == .cancelled {
+                DiagnosticLog.shared.log(.api, "Request cancelled")
+                return
+            }
             DiagnosticLog.shared.log(.api, "API error: Network error: \(error.localizedDescription)")
             failedTransiently(.offline(error.localizedDescription))
         } catch UsageAPIError.http(let status) {
             DiagnosticLog.shared.log(.api, "API error: HTTP \(status)")
             failedTransiently(.server(status: status))
+        } catch is CancellationError {
+            DiagnosticLog.shared.log(.api, "Request cancelled")
         } catch {
             DiagnosticLog.shared.log(.api, "API error: \(error.localizedDescription)")
             failedTransiently(.unexpectedResponse)

@@ -161,6 +161,12 @@ struct StatusSnapshot: Sendable {
 }
 
 extension StatusSnapshot {
+    /// Incident links are opened in the browser, so only https ones are kept.
+    private static func secureURL(_ string: String) -> URL? {
+        guard let url = URL(string: string), url.scheme?.lowercased() == "https" else { return nil }
+        return url
+    }
+
     init(response: StatusResponse, monitored: Set<KnownComponent>, fetchedAt: Date) {
         let monitoredIDs = Set(monitored.map(\.rawValue))
 
@@ -176,7 +182,7 @@ extension StatusSnapshot {
                 guard let components = incident.components, !components.isEmpty else { return true }
                 return components.contains { monitoredIDs.contains($0.id) }
             }
-            .map { Incident(id: $0.id, name: $0.name, url: $0.shortlink.flatMap { URL(string: $0) }) }
+            .map { Incident(id: $0.id, name: $0.name, url: $0.shortlink.flatMap(Self.secureURL)) }
 
         self.init(
             displaySeverity: affected.map(\.severity).max() ?? .operational,

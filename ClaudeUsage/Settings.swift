@@ -75,8 +75,8 @@ extension AppStorage {
     }
 }
 
-/// Rewrites preferences that older builds stored differently. Runs at launch,
-/// before any view reads a preference.
+/// Rewrites preferences that older builds stored differently. Runs first at
+/// launch, before anything reads a preference.
 nonisolated enum PreferenceMigrations {
     static func run(on defaults: UserDefaults) {
         // Onboarding was once scoped to the bundle path: hasCompletedOnboarding_<hash>.

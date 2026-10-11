@@ -89,6 +89,28 @@ struct StatusStoreTests {
     }
 }
 
+@Suite("StatusSnapshot incident links")
+struct StatusIncidentLinkTests {
+
+    @Test("an incident link is kept only when it is https")
+    func onlyHTTPSLinks() {
+        let snapshot = StatusSnapshot(
+            response: StatusResponse(
+                status: .init(indicator: "minor", description: "Partial Outage"),
+                components: [],
+                incidents: [
+                    .init(id: "a", name: "Secure", status: "investigating", shortlink: "https://stspg.io/abc", components: nil),
+                    .init(id: "b", name: "Insecure", status: "investigating", shortlink: "http://stspg.io/abc", components: nil),
+                ]
+            ),
+            monitored: [],
+            fetchedAt: Date()
+        )
+
+        #expect(snapshot.relevantIncidents.map(\.url) == [URL(string: "https://stspg.io/abc"), nil])
+    }
+}
+
 private func makeResponse(
     components: [(KnownComponent, String)],
     incidents: [(String, [KnownComponent])] = []
