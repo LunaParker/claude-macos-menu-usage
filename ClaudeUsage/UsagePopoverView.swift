@@ -263,7 +263,8 @@ private struct MainContentView: View {
 
 // MARK: - Bar
 
-/// One quota: title, percentage, bar and time to reset.
+/// One quota: title, percentage, bar with the window's elapsed share marked,
+/// time to reset and whether usage is on pace.
 struct QuotaBarView: View {
     let bar: UsageSnapshot.Bar
 
@@ -278,14 +279,24 @@ struct QuotaBarView: View {
                     .foregroundStyle(.secondary)
             }
 
-            CapsuleBar(fraction: bar.fraction, colors: fillGradient)
+            // Re-rendered each minute so the tick and countdown don't freeze while the popover stays open.
+            TimelineView(.everyMinute) { context in
+                let pace = UsagePace(bar: bar, now: context.date)
+                VStack(alignment: .leading, spacing: 6) {
+                    CapsuleBar(fraction: bar.fraction, colors: fillGradient, marker: pace?.elapsed)
 
-            if let resetsAt = bar.resetsAt {
-                // Re-rendered each minute so the countdown doesn't freeze while the popover stays open.
-                TimelineView(.everyMinute) { context in
-                    Text(Self.resetLabel(for: resetsAt, now: context.date))
+                    if let resetsAt = bar.resetsAt {
+                        HStack {
+                            Text(Self.resetLabel(for: resetsAt, now: context.date))
+                            Spacer()
+                            if let verdict = pace?.verdict {
+                                Text(verdict.label(now: context.date))
+                                    .foregroundStyle(verdict == .onPace ? Color.secondary : Color.orange)
+                            }
+                        }
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
@@ -295,8 +306,10 @@ struct QuotaBarView: View {
     }
 
     private var accessibilityText: String {
-        let reset = bar.resetsAt.map { ", " + Self.resetLabel(for: $0, now: Date()) } ?? ""
-        return "\(bar.title) \(bar.percentLabel)\(reset)"
+        let now = Date()
+        let reset = bar.resetsAt.map { ", " + Self.resetLabel(for: $0, now: now) } ?? ""
+        let pace = UsagePace(bar: bar, now: now)?.verdict.map { ", " + $0.label(now: now) } ?? ""
+        return "\(bar.title) \(bar.percentLabel)\(reset)\(pace)"
     }
 
     private var fillGradient: [Color] {
@@ -322,9 +335,11 @@ struct QuotaBarView: View {
 
 /// A capsule track filled to `fraction` with a horizontal gradient. Never
 /// thinner than a dot, so an empty quota still shows where the bar is.
+/// `marker` draws a tick at that share of the track, for the elapsed window.
 struct CapsuleBar: View {
     let fraction: Double
     let colors: [Color]
+    var marker: Double? = nil
 
     var body: some View {
         GeometryReader { proxy in
@@ -334,6 +349,12 @@ struct CapsuleBar: View {
                 Capsule()
                     .fill(LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing))
                     .frame(width: max(6, proxy.size.width * fraction))
+                if let marker {
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(.primary.opacity(0.45))
+                        .frame(width: 2, height: 12)
+                        .offset(x: proxy.size.width * marker - 1)
+                }
             }
         }
         .frame(height: 8)
