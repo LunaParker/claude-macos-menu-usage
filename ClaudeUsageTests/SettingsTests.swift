@@ -52,6 +52,21 @@ struct SettingsTests {
         #expect(defaults[SettingsKeys.hasCompletedOnboarding] == false)
     }
 
+    @Test("the old session-percentage switch becomes the session metric")
+    func sessionPercentBecomesMetric() {
+        let on = TestDefaults.make()
+        on.set(true, forKey: "showSessionPercentInMenuBar")
+        PreferenceMigrations.run(on: on)
+        #expect(on[SettingsKeys.menuBarMetric] == .session)
+        #expect(on.object(forKey: "showSessionPercentInMenuBar") == nil)
+
+        let off = TestDefaults.make()
+        off.set(false, forKey: "showSessionPercentInMenuBar")
+        PreferenceMigrations.run(on: off)
+        #expect(off[SettingsKeys.menuBarMetric] == .off)
+        #expect(off.object(forKey: "showSessionPercentInMenuBar") == nil)
+    }
+
     @Test("the removed Sonnet-bar setting is deleted")
     func removesSonnetSetting() {
         let defaults = TestDefaults.make()
