@@ -40,7 +40,8 @@ ClaudeUsage/
   Scheduler.swift                — Delayed main-actor work behind a protocol (tests run it on demand)
   DisplaySleepMonitor.swift      — Display sleep/wake tracking (DarkWake keeps displays off)
   NotificationManager.swift      — macOS notifications: usage alerts, auth-lost, test banner
-  ThresholdTracker.swift         — Pure, persisted session-alert decisions
+  ThresholdTracker.swift         — Pure alert decisions for one quota's window
+  UsageAlerts.swift              — One tracker per quota, persistence, alert wording
   StatusStore.swift              — status.claude.com: components, snapshot, client, store
   DiagnosticLog.swift            — Diagnostic log (unified log + file + in-memory list), LogSink
   DiagnosticLogView.swift        — Diagnostic Log window
@@ -125,11 +126,12 @@ OAuth credentials are stored by the `claude` CLI in the macOS login keychain:
 
 ## Notification Threshold Logic
 
-`ThresholdTracker` decides which session alerts are due; `NotificationManager` delivers them and saves the tracker (under `sessionAlertTracker` in defaults) whenever it changes, so a relaunch in the same window doesn't repeat an alert.
+`UsageAlerts` keeps one `ThresholdTracker` per quota (session, weekly, model-scoped weekly) and decides which alerts are due; `NotificationManager` delivers them and saves the trackers (under `alertTracker.<kind>` in defaults) whenever they change, so a relaunch in the same window doesn't repeat an alert. `PreferenceMigrations` moves the older single `sessionAlertTracker` to the session key.
 
-- **Thresholds:** 50%, 75%, 90% of session capacity (each individually toggleable in Settings)
-- **Deduplication:** each threshold fires at most once per session window. A crossing waits, unconsumed, until the threshold is enabled and notification permission is granted.
-- **Window rotation detection:** Compares `resetsAt` timestamps with a 2-second tolerance (the API jitters fractional seconds between responses; session windows are 5 hours apart so this is safe). When the session window rotates:
+- **Thresholds:** 50%, 75%, 90% of a quota's capacity (each individually toggleable in Settings), applied to every quota switched on under "Quotas to Watch" (all three by default). The model-scoped tracker is only evaluated when the snapshot has that bar.
+- **Deduplication:** each threshold fires at most once per window, per quota. A reading that passes several thresholds at once sends one alert, for the highest, and marks the rest as fired. A crossing waits, unconsumed, until the threshold and its quota are enabled and notification permission is granted.
+- **Wording:** `UsageAlerts.Alert.message(now:)` names the quota ("current session", "weekly", "<API title> weekly") and appends when it resets: the clock time within 24 hours, the weekday and time beyond that. Identifiers are `usage-threshold-<kind>-<percent>` and `usage-reset-<kind>`, so quotas don't replace each other's banners.
+- **Window rotation detection:** Compares `resetsAt` timestamps with a 2-second tolerance (the API jitters fractional seconds between responses; windows are hours or days apart so this is safe). When a quota's window rotates:
   - If the previous window reached 100% (`sawCapacity`), a "capacity reset" notification fires (if enabled)
   - The fired set is re-seeded with the thresholds already exceeded except the highest, so a launch or new window fires at most one alert
   - `sawCapacity` is cleared
