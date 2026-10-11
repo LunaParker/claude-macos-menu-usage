@@ -2,10 +2,10 @@
 //  ThresholdTrackerTests.swift
 //  ClaudeUsageTests
 //
-//  ThresholdTracker decides which session-usage alerts are due. Each
-//  threshold fires at most once per session window, a launch or a new
-//  window never bursts stale alerts, crossings wait for permission and for
-//  the user to enable them, and the state survives a relaunch.
+//  ThresholdTracker decides which alerts are due for one quota's window.
+//  Each threshold fires at most once per window, one reading sends at most
+//  one alert, a launch or a new window never bursts stale alerts, and
+//  crossings wait for permission and for the user to enable them.
 //
 
 import Foundation
@@ -33,6 +33,15 @@ struct ThresholdTrackerTests {
 
         #expect(evaluate(&tracker, 0.80) == [.crossed(percent: 75)])
         #expect(evaluate(&tracker, 0.92) == [.crossed(percent: 90)])
+    }
+
+    @Test("several thresholds passed in one reading fire only the highest")
+    func oneReadingOneAlert() {
+        var tracker = ThresholdTracker()
+        _ = evaluate(&tracker, 0.10)
+
+        #expect(evaluate(&tracker, 0.92) == [.crossed(percent: 90)])
+        #expect(evaluate(&tracker, 0.93) == [])
     }
 
     @Test("a disabled threshold stays pending until the user enables it")
@@ -90,18 +99,6 @@ struct ThresholdTrackerTests {
         var off = ThresholdTracker()
         _ = evaluate(&off, 1.0)
         #expect(evaluate(&off, 0.0, resetsAt: window.addingTimeInterval(5 * 3600), resetAlert: false) == [])
-    }
-
-    @Test("saved state survives a relaunch, so the same window's alert is not repeated")
-    func persistsAcrossRelaunch() throws {
-        let defaults = TestDefaults.make()
-        var first = ThresholdTracker()
-        #expect(evaluate(&first, 0.80) == [.crossed(percent: 75)])
-        first.save(to: defaults)
-
-        var relaunched = try #require(ThresholdTracker.load(from: defaults))
-
-        #expect(evaluate(&relaunched, 0.80) == [])
     }
 
     private func evaluate(

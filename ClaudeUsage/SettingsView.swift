@@ -259,6 +259,10 @@ private struct NotificationsSettingsView: View {
     @AppStorage(SettingsKeys.notifyAt90Percent) private var notifyAt90: Bool
     @AppStorage(SettingsKeys.notifyOnReset) private var notifyOnReset: Bool
 
+    @AppStorage(SettingsKeys.notifyForSession) private var notifyForSession: Bool
+    @AppStorage(SettingsKeys.notifyForWeekly) private var notifyForWeekly: Bool
+    @AppStorage(SettingsKeys.notifyForScopedWeekly) private var notifyForScopedWeekly: Bool
+
     var body: some View {
         Form {
             if notifications.authorizationStatus != .authorized {
@@ -268,52 +272,46 @@ private struct NotificationsSettingsView: View {
             }
 
             Section {
-                Toggle(isOn: toggleWithAuthRequest($notifyAt50)) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("50% usage")
-                        Text("Notify when current session usage reaches 50%.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Toggle(isOn: toggleWithAuthRequest($notifyAt75)) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("75% usage")
-                        Text("Notify when current session usage reaches 75%.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Toggle(isOn: toggleWithAuthRequest($notifyAt90)) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("90% usage")
-                        Text("Notify when current session usage reaches 90%.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Toggle(isOn: toggleWithAuthRequest($notifyOnReset)) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Usage reset")
-                        Text("Notify when your session usage resets after reaching 100%.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                alertToggle($notifyAt50, "50% usage", "Notify when a watched quota reaches 50%.")
+                alertToggle($notifyAt75, "75% usage", "Notify when a watched quota reaches 75%.")
+                alertToggle($notifyAt90, "90% usage", "Notify when a watched quota reaches 90%.")
+                alertToggle($notifyOnReset, "Usage reset", "Notify when a watched quota resets after reaching 100%.")
             } header: {
-                Text("Session Usage Alerts")
+                Text("Usage Alerts")
             } footer: {
-                Text("Each threshold fires at most once per session window. The reset notification requires that usage reached 100% before the window expired.")
+                Text("Each threshold fires at most once per window for each quota. A reading that passes several thresholds at once sends one alert, for the highest. The reset notification requires that usage reached 100% before the window expired.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section {
+                alertToggle($notifyForSession, "Current session", "The 5-hour session window.")
+                alertToggle($notifyForWeekly, "Weekly limit", "The 7-day limit across all models.")
+                alertToggle(
+                    $notifyForScopedWeekly,
+                    "Model weekly limit",
+                    "The model-specific weekly quota, currently Fable on Max 5x and 20x plans. Only applies when your plan has one."
+                )
+            } header: {
+                Text("Quotas to Watch")
             }
         }
         .formStyle(.grouped)
         .task {
             await notifications.refreshAuthorizationStatus()
+        }
+    }
+
+    private func alertToggle(_ binding: Binding<Bool>, _ title: String, _ caption: String) -> some View {
+        Toggle(isOn: toggleWithAuthRequest(binding)) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                Text(caption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
