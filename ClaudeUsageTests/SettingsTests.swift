@@ -19,6 +19,7 @@ struct SettingsTests {
         let defaults = TestDefaults.make()
 
         #expect(defaults[SettingsKeys.serviceStatusEnabled] == true)
+        #expect(defaults[SettingsKeys.showPaceOnBars] == true)
         #expect(defaults[SettingsKeys.pollIntervalSeconds] == 300)
 
         defaults.set(false, forKey: SettingsKeys.serviceStatusEnabled.name)

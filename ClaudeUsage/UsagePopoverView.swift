@@ -268,6 +268,8 @@ private struct MainContentView: View {
 struct QuotaBarView: View {
     let bar: UsageSnapshot.Bar
 
+    @AppStorage(SettingsKeys.showPaceOnBars) private var showPace: Bool
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
@@ -281,7 +283,7 @@ struct QuotaBarView: View {
 
             // Re-rendered each minute so the tick and countdown don't freeze while the popover stays open.
             TimelineView(.everyMinute) { context in
-                let pace = UsagePace(bar: bar, now: context.date)
+                let pace = showPace ? UsagePace(bar: bar, now: context.date) : nil
                 VStack(alignment: .leading, spacing: 6) {
                     CapsuleBar(fraction: bar.fraction, colors: fillGradient, marker: pace?.elapsed)
 
@@ -308,7 +310,7 @@ struct QuotaBarView: View {
     private var accessibilityText: String {
         let now = Date()
         let reset = bar.resetsAt.map { ", " + Self.resetLabel(for: $0, now: now) } ?? ""
-        let pace = UsagePace(bar: bar, now: now)?.verdict.map { ", " + $0.label(now: now) } ?? ""
+        let pace = (showPace ? UsagePace(bar: bar, now: now)?.verdict : nil).map { ", " + $0.label(now: now) } ?? ""
         return "\(bar.title) \(bar.percentLabel)\(reset)\(pace)"
     }
 
