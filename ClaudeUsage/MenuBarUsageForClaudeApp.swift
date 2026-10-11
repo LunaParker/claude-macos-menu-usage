@@ -5,6 +5,7 @@
 //  Created by Luna Parker on 4/11/2026.
 //
 
+import AppIntents
 import SwiftUI
 
 @main
@@ -20,6 +21,7 @@ struct MenuBarUsageForClaudeApp: App {
         notifications.reauthenticateHandler = { [weak usage] in usage?.manualRetry() }
         _notifications = State(initialValue: notifications)
         _usage = State(initialValue: usage)
+        AppDependencyManager.shared.add(dependency: usage)
 
         // Runs before any scene is built, so by the time the MenuBarExtra is
         // rendered this is the only instance in the menu bar.

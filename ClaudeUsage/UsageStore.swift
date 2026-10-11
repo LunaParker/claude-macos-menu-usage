@@ -206,6 +206,33 @@ final class UsageStore {
         }
     }
 
+    // MARK: App Intents
+
+    /// What the App Intents ask for: the data on hand, fetched first when there
+    /// is none or when asked, with a fetch already under way awaited instead.
+    func currentUsage(refreshFirst: Bool) async throws(UsageRequestError) -> UsageSnapshot {
+        guard dependencies.defaults[SettingsKeys.hasCompletedOnboarding] else { throw .notSetUp }
+        if refreshFirst || snapshot == nil {
+            if isRefreshing {
+                await waitForRefresh()
+            } else {
+                await refresh(trigger: .manual)
+            }
+        }
+        if let snapshot { return snapshot }
+        if let failure { throw .unavailable(failure) }
+        throw .noData
+    }
+
+    /// Up to 30 s, which outlasts the fetch timeout.
+    private func waitForRefresh() async {
+        var waited = 0
+        while isRefreshing, waited < 300 {
+            try? await Task.sleep(for: .milliseconds(100))
+            waited += 1
+        }
+    }
+
     // MARK: Refresh
 
     /// Fetches usage unless a refresh is in flight, the popover debounce

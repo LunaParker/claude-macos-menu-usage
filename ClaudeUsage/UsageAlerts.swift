@@ -150,14 +150,23 @@ nonisolated extension UsageAlerts.Alert {
         }
     }
 
-    /// The weekly limit resets days out, so beyond a day the weekday is given too.
     private func resetSentence(now: Date, locale: Locale, timeZone: TimeZone) -> String? {
-        guard let resetsAt = bar.resetsAt, resetsAt > now else { return nil }
+        bar.resetsAt
+            .flatMap { ResetWording.phrase(for: $0, now: now, locale: locale, timeZone: timeZone) }
+            .map { "Resets \($0)." }
+    }
+}
+
+/// "at 6:00 AM" within a day, "Thursday at 3:00 PM" beyond: the weekly limit
+/// resets days out. Nil once the reset has passed.
+nonisolated enum ResetWording {
+    static func phrase(for resetsAt: Date, now: Date, locale: Locale, timeZone: TimeZone) -> String? {
+        guard resetsAt > now else { return nil }
         let style = Date.FormatStyle(locale: locale, timeZone: timeZone)
         let time = resetsAt.formatted(style.hour().minute())
         if resetsAt.timeIntervalSince(now) < 24 * 3600 {
-            return "Resets at \(time)."
+            return "at \(time)"
         }
-        return "Resets \(resetsAt.formatted(style.weekday(.wide))) at \(time)."
+        return "\(resetsAt.formatted(style.weekday(.wide))) at \(time)"
     }
 }

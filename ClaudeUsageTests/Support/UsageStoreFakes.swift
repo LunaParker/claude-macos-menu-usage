@@ -39,10 +39,15 @@ nonisolated final class FakeKeychain: @unchecked Sendable {
 final class FakeFetcher: UsageFetching {
     /// Consumed in order; the last one repeats.
     var responses: [Result<UsageResponse, UsageAPIError>] = [.success(.sample())]
+    /// How long each fetch stays in flight, for tests that need to observe one.
+    var delay: Duration = .zero
     private(set) var tokens: [String] = []
 
     func fetch(accessToken: String) async throws -> UsageResponse {
         tokens.append(accessToken)
+        if delay > .zero {
+            try await Task.sleep(for: delay)
+        }
         let next = responses.count > 1 ? responses.removeFirst() : responses[0]
         return try next.get()
     }
