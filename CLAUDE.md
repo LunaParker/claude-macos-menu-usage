@@ -85,12 +85,13 @@ The app polls `GET https://api.anthropic.com/api/oauth/usage` (undocumented endp
 - `User-Agent` identifying the app, `MenuBarUsageForClaude/<CFBundleShortVersionString> (macOS menu bar)`
 
 **Response shape (`UsageResponse`):**
-- `fiveHour` — 5-hour rolling session window (capacity + usage + resetsAt)
-- `sevenDay` — 7-day weekly limit (capacity + usage + resetsAt)
-- `limits` — generalised limits array (`kind`, integer `percent` 0–100, `resets_at`, `scope`). The model-scoped weekly quota (currently Fable, Max 5x/20x only) exists **only** here as a `weekly_scoped` entry — there is no `seven_day_fable` field. The bar is presence-gated and titled from `scope.model.display_name`.
-- `extraUsage` — paid overflow credits (used, remaining, monthlyLimit)
+- `five_hour` / `seven_day` — the legacy windows (`utilization` 0–100, `resets_at`; also `limit_dollars`/`used_dollars`/`remaining_dollars` and `locked_reason`, all null on Max and not decoded).
+- `limits` — the newer description of the same quotas: one entry per quota with `group`, `kind` (`session`, `weekly_all`, `weekly_scoped`), integer `percent`, `resets_at`, `scope.model.display_name` for scoped ones, `severity` and `is_active`. **The array wins per bar**; a bar missing from it falls back to its legacy window. The model-scoped weekly quota (currently Fable, Max 5x/20x) exists **only** here; the bar is presence-gated, titled from the API, and if several `weekly_scoped` entries ever appear the fullest is shown. The array decodes leniently (`LenientArray`): a malformed entry is skipped and counted in `droppedLimitEntries`, never fatal.
+- `extra_usage` — paid overflow credits (used, remaining, monthlyLimit).
 
-`seven_day_opus` is returned but not decoded. The response is decoded into a `UsageSnapshot` with pre-computed `Bar` values (fraction 0...1, percent label, reset time). `peakUtilization` (max of all bar fractions) drives the menu bar icon variant.
+Observed 2026-10-11 and deliberately not used: `is_active` was `true` for the session and `false` for both live weekly limits (in a July sample it was `true` only on Fable, then the fullest), so it most likely flags the binding limit, does **not** mean "applies to this plan", and must not hide bars; `severity` has only been seen as `"normal"`. Also present: `seven_day_breakdown` (weekly usage by surface: Claude Code, Chats, Cowork, Other, with `window_started_at` = `resets_at` − 7 d), `weekly_scoped_shares` (the scoped allowance as a share of the weekly), `spend` (credits in minor units with a currency), `seven_day_opus`/`seven_day_sonnet` and a dozen null flag fields. "Copy Last Response" on the Developer tab puts the latest raw JSON on the clipboard (kept in memory only; it holds no credentials).
+
+The response is decoded into a `UsageSnapshot` with pre-computed `Bar` values (fraction 0...1, percent label, reset time). `peakUtilization` (max of all bar fractions) drives the menu bar icon variant.
 
 **Networking:** both API clients send through `HTTPClient`, an ephemeral `URLSession` with no URL cache and no cookie storage. `URLSession.shared` used to write every response, with its request (bearer token included), into `~/Library/Caches/com.shyowlstudios.ClaudeUsage/Cache.db`; launch deletes that cache and sets `URLCache.shared` to zero capacity. The usage request times out after 20 s, the status request after 10 s.
 

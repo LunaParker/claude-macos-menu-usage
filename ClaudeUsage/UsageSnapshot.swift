@@ -70,34 +70,24 @@ nonisolated struct UsageSnapshot: Equatable, Sendable {
 
 extension UsageStore {
     static func buildSnapshot(from response: UsageResponse, fetchedAt: Date = Date()) -> UsageSnapshot {
-        let session = bar(
-            kind: .session,
-            title: "Current Session",
-            window: response.fiveHour
-        )
-        let weekly = bar(
-            kind: .weekly,
-            title: "Weekly Limit",
-            window: response.sevenDay
-        )
+        // The `limits` array is the newer description of the same quotas; it
+        // wins per bar, with the legacy `five_hour`/`seven_day` windows as fallback.
+        let limits = response.limits ?? []
+        let session = limits.first { $0.kind == "session" }
+            .map { bar(kind: .session, title: "Current Session", utilization: $0.percent, resetsAt: $0.resetsAt) }
+            ?? bar(kind: .session, title: "Current Session", window: response.fiveHour)
+        let weekly = limits.first { $0.kind == "weekly_all" }
+            .map { bar(kind: .weekly, title: "Weekly Limit", utilization: $0.percent, resetsAt: $0.resetsAt) }
+            ?? bar(kind: .weekly, title: "Weekly Limit", window: response.sevenDay)
 
-        // The model-scoped weekly quota (currently Fable) has no legacy
-        // `seven_day_*` field — it exists only as a `weekly_scoped` entry
-        // in the `limits` array, and only on plans that have the quota
-        // (Max 5x/20x). Presence-gated: no entry, no bar. The title comes
-        // from the API so a renamed or re-scoped quota follows along.
-        let scopedWeekly: UsageSnapshot.Bar?
-        if let entry = response.limits?.first(where: { $0.kind == "weekly_scoped" }),
-           let title = entry.scope?.model?.displayName {
-            scopedWeekly = bar(
-                kind: .scopedWeekly,
-                title: title,
-                utilization: entry.percent,
-                resetsAt: entry.resetsAt
-            )
-        } else {
-            scopedWeekly = nil
-        }
+        // The model-scoped weekly quota (currently Fable, Max 5x/20x) exists only
+        // as a `weekly_scoped` entry. Presence-gated: no entry, no bar. The title
+        // comes from the API so a renamed quota follows along, and if the API
+        // ever lists several, the fullest one is shown.
+        let scopedWeekly = limits
+            .filter { $0.kind == "weekly_scoped" && $0.scope?.model?.displayName != nil }
+            .max { ($0.percent ?? 0) < ($1.percent ?? 0) }
+            .map { bar(kind: .scopedWeekly, title: $0.scope!.model!.displayName!, utilization: $0.percent, resetsAt: $0.resetsAt) }
 
         // The Extra Usage card only appears if the account has actually
         // enabled paid overflow in claude.ai settings — in which case the

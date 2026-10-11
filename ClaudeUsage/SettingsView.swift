@@ -9,6 +9,7 @@
 //  diagnostic counters.
 //
 
+import AppKit
 import ServiceManagement
 import SwiftUI
 import UserNotifications
@@ -411,6 +412,21 @@ private struct DeveloperSettingsView: View {
     @AppStorage(SettingsKeys.simulateStatusOutage)
     private var simulateStatusOutage: Bool
 
+    /// Pretty-printed when it parses, raw otherwise.
+    private func copyLastResponse() {
+        guard let data = usage.lastResponseBody else { return }
+        let text: String
+        if let object = try? JSONSerialization.jsonObject(with: data),
+           let pretty = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]),
+           let string = String(data: pretty, encoding: .utf8) {
+            text = string
+        } else {
+            text = String(decoding: data, as: UTF8.self)
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
     var body: some View {
         Form {
             Section {
@@ -492,13 +508,17 @@ private struct DeveloperSettingsView: View {
                         usage.resetDiagnostics()
                     }
                     Spacer()
+                    Button("Copy Last Response") {
+                        copyLastResponse()
+                    }
+                    .disabled(usage.lastResponseBody == nil)
                     Button("Force Refresh") {
                         Task { await usage.refresh() }
                     }
                     .disabled(usage.isRefreshing)
                 }
             } footer: {
-                Text("Resetting the counters also resets the \u{201c}Tracking since\u{201d} timer so you can benchmark the fetch rate from a fresh baseline. Force Refresh bypasses the debounce but not the rate-limit cooldown.")
+                Text("Resetting the counters also resets the \u{201c}Tracking since\u{201d} timer so you can benchmark the fetch rate from a fresh baseline. Copy Last Response puts the latest raw JSON from the usage endpoint on the clipboard. Force Refresh bypasses the debounce but not the rate-limit cooldown.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

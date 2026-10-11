@@ -79,12 +79,54 @@ struct UsageResponse: Decodable, Sendable {
     let sevenDay: UsageWindow?
     let limits: [LimitEntry]?
     let extraUsage: ExtraUsageResponse?
+    /// `limits` entries that didn't decode and were skipped.
+    var droppedLimitEntries = 0
 
     enum CodingKeys: String, CodingKey {
         case fiveHour = "five_hour"
         case sevenDay = "seven_day"
         case limits
         case extraUsage = "extra_usage"
+    }
+}
+
+extension UsageResponse {
+    /// One malformed `limits` entry must not take the whole response down.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        fiveHour = try container.decodeIfPresent(UsageWindow.self, forKey: .fiveHour)
+        sevenDay = try container.decodeIfPresent(UsageWindow.self, forKey: .sevenDay)
+        extraUsage = try container.decodeIfPresent(ExtraUsageResponse.self, forKey: .extraUsage)
+        let lenient = try container.decodeIfPresent(LenientArray<LimitEntry>.self, forKey: .limits)
+        limits = lenient?.elements
+        droppedLimitEntries = lenient?.dropped ?? 0
+    }
+}
+
+/// An array decoded element by element; the ones that fail are counted, not fatal.
+struct LenientArray<Element: Decodable>: Decodable {
+    let elements: [Element]
+    let dropped: Int
+
+    init(from decoder: Decoder) throws {
+        var container = try decoder.unkeyedContainer()
+        var elements: [Element] = []
+        var dropped = 0
+        while !container.isAtEnd {
+            if let element = try? container.decode(Element.self) {
+                elements.append(element)
+            } else {
+                // A failed decode leaves the index in place; consume the slot.
+                _ = try? container.decode(AnyValue.self)
+                dropped += 1
+            }
+        }
+        self.elements = elements
+        self.dropped = dropped
+    }
+
+    private struct AnyValue: Decodable {
+        init(from decoder: Decoder) throws {}
     }
 }
 
@@ -122,13 +164,26 @@ enum UsageAPIError: LocalizedError {
 /// Fetches usage with an access token. `UsageStore` checks expiry first.
 protocol UsageFetching {
     func fetch(accessToken: String) async throws -> UsageResponse
+    /// The bytes of the latest successful response, for the Developer tab.
+    var lastResponseBody: Data? { get }
 }
 
-struct UsageAPIClient: UsageFetching {
+extension UsageFetching {
+    var lastResponseBody: Data? { nil }
+}
+
+final class UsageAPIClient: UsageFetching {
     /// The undocumented endpoint that Claude Code itself calls for status-line data.
     /// This is not a public API and may change without notice.
-    var endpoint: URL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
-    var http: HTTPClient = .shared
+    let endpoint: URL
+    let http: HTTPClient
+    /// Kept in memory only; the body holds quota figures, never credentials.
+    private(set) var lastResponseBody: Data?
+
+    init(endpoint: URL = URL(string: "https://api.anthropic.com/api/oauth/usage")!, http: HTTPClient = .shared) {
+        self.endpoint = endpoint
+        self.http = http
+    }
 
     func fetch(accessToken: String) async throws -> UsageResponse {
         var request = URLRequest(url: endpoint)
@@ -163,11 +218,21 @@ struct UsageAPIClient: UsageFetching {
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601WithFractionalSeconds
+        let decoded: UsageResponse
         do {
-            return try decoder.decode(UsageResponse.self, from: data)
+            decoded = try decoder.decode(UsageResponse.self, from: data)
         } catch {
             throw UsageAPIError.decoding(error)
         }
+        lastResponseBody = data
+        if decoded.droppedLimitEntries > 0 {
+            DiagnosticLog.shared.log(.api, "Skipped \(decoded.droppedLimitEntries) malformed limits entries")
+        }
+        let scoped = decoded.limits?.filter { $0.kind == "weekly_scoped" }.count ?? 0
+        if scoped > 1 {
+            DiagnosticLog.shared.log(.api, "\(scoped) weekly_scoped limits; showing the fullest")
+        }
+        return decoded
     }
 }
 

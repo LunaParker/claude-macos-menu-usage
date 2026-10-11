@@ -12,6 +12,21 @@ import Foundation
 import Testing
 @testable import ClaudeUsage
 
+@Suite("UsageStore last response")
+struct UsageStoreLastResponseTests {
+
+    @Test("the Developer tab reads the fetcher's latest body through the store")
+    func exposesFetcherBody() {
+        let harness = StoreHarness()
+        let store = harness.makeStore()
+        #expect(store.lastResponseBody == nil)
+
+        harness.fetcher.lastResponseBody = Data("{}".utf8)
+
+        #expect(store.lastResponseBody == Data("{}".utf8))
+    }
+}
+
 @Suite("UsageStore.currentUsage")
 struct UsageStoreIntentTests {
 
