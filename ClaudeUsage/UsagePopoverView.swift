@@ -351,6 +351,9 @@ struct CapsuleBar: View {
                 Capsule()
                     .fill(LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing))
                     .frame(width: max(6, proxy.size.width * fraction))
+            }
+            // An overlay, not a third layer: the taller tick must not stretch the capsules.
+            .overlay(alignment: .leading) {
                 if let marker {
                     RoundedRectangle(cornerRadius: 1)
                         .fill(.primary.opacity(0.45))
