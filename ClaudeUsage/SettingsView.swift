@@ -311,12 +311,13 @@ private struct NotificationsSettingsView: View {
             }
 
             Section {
-                alertToggle($notifyForSession, "Current session", "The 5-hour session window.")
-                alertToggle($notifyForWeekly, "Weekly limit", "The 7-day limit across all models.")
+                alertToggle($notifyForSession, "Current session", "The 5-hour session window.", requestsAuthorization: false)
+                alertToggle($notifyForWeekly, "Weekly limit", "The 7-day limit across all models.", requestsAuthorization: false)
                 alertToggle(
                     $notifyForScopedWeekly,
                     "Model weekly limit",
-                    "The model-specific weekly quota, currently Fable on Max 5x and 20x plans. Only applies when your plan has one."
+                    "The model-specific weekly quota, currently Fable on Max 5x and 20x plans. Only applies when your plan has one.",
+                    requestsAuthorization: false
                 )
             } header: {
                 Text("Quotas to Watch")
@@ -328,8 +329,15 @@ private struct NotificationsSettingsView: View {
         }
     }
 
-    private func alertToggle(_ binding: Binding<Bool>, _ title: String, _ caption: String) -> some View {
-        Toggle(isOn: toggleWithAuthRequest(binding)) {
+    /// The threshold toggles ask for notification permission when first switched on;
+    /// the quota switches only choose what the thresholds apply to.
+    private func alertToggle(
+        _ binding: Binding<Bool>,
+        _ title: String,
+        _ caption: String,
+        requestsAuthorization: Bool = true
+    ) -> some View {
+        Toggle(isOn: requestsAuthorization ? toggleWithAuthRequest(binding) : binding) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                 Text(caption)

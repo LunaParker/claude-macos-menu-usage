@@ -15,6 +15,10 @@ struct MenuBarUsageForClaudeApp: App {
     @State private var status = StatusStore()
 
     init() {
+        // Before anything reads a preference: NotificationManager loads the alert trackers.
+        if !LaunchContext.isUnitTestHost {
+            PreferenceMigrations.run(on: .standard)
+        }
         let notifications = NotificationManager()
         let usage = UsageStore(dependencies: .live(notifier: notifications))
         // The notification goes through the store, which re-reads the Keychain afterwards.
@@ -27,7 +31,6 @@ struct MenuBarUsageForClaudeApp: App {
         // rendered this is the only instance in the menu bar.
         guard !LaunchContext.isUnitTestHost else { return }
         SingleInstance.enforceUniqueness()
-        PreferenceMigrations.run(on: .standard)
 
         // Older builds cached responses, bearer token included, on disk.
         LegacyURLCache.removeForThisApp()

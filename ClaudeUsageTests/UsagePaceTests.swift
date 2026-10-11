@@ -91,6 +91,13 @@ struct UsagePaceLabelTests {
         #expect(verdict.label(now: now, locale: locale, timeZone: timeZone) == "100% by 5:00\u{202F}AM")
     }
 
+    @Test("a projection on another calendar day names it, even within 24 hours")
+    func nextDayWithin24Hours() {
+        let verdict = UsagePace.Verdict.full(at: now.addingTimeInterval(23 * 3600))
+
+        #expect(verdict.label(now: now, locale: locale, timeZone: timeZone) == "100% by Sat 2:00\u{202F}AM")
+    }
+
     @Test("a projection further out adds the short weekday")
     func beyondADay() {
         let verdict = UsagePace.Verdict.full(at: now.addingTimeInterval(2 * 86_400 + 3600))

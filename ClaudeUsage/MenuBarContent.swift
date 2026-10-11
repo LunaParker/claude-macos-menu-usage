@@ -45,14 +45,15 @@ nonisolated struct MenuBarContent: Equatable, Sendable {
         let nearLimit = { (bar: UsageSnapshot.Bar) in bar.fraction >= 0.9 && bar.fraction < 1 }
 
         if let full, let resetsAt = full.resetsAt {
-            let countdown = Self.countdown(until: resetsAt, from: now)
-            text = "↻ \(countdown)"
+            text = "↻ \(Self.countdown(until: resetsAt, from: now))"
             showsWarning = false
-            accessibilityLabel = "\(Self.appName), \(full.title) used up, resets in \(countdown)"
+            accessibilityLabel = "\(Self.appName), \(full.title) used up, resets in \(Self.spokenCountdown(until: resetsAt, from: now))"
         } else if let shown = Self.bar(for: metric, in: snapshot) {
             text = shown.percentLabel
-            showsWarning = snapshot.bars.contains { $0.id != shown.id && nearLimit($0) }
+            let warned = snapshot.bars.first { $0.id != shown.id && nearLimit($0) }
+            showsWarning = warned != nil
             accessibilityLabel = "\(Self.appName), \(shown.title) \(shown.percentLabel)"
+                + (warned.map { ", \($0.title) above 90%" } ?? "")
         } else {
             text = nil
             let warned = snapshot.bars.first(where: nearLimit)
@@ -92,5 +93,19 @@ nonisolated struct MenuBarContent: Equatable, Sendable {
         }
         let minutes = Int((seconds / 60).rounded(.up))
         return String(format: "%d:%02d", minutes / 60, minutes % 60)
+    }
+
+    /// The same countdown in words, for VoiceOver: "1 hour 12 minutes", "2 days 3 hours".
+    static func spokenCountdown(until resetsAt: Date, from now: Date) -> String {
+        let seconds = max(0, resetsAt.timeIntervalSince(now))
+        let units: [(Int, String)]
+        if seconds >= 86_400 {
+            units = [(Int(seconds / 86_400), "day"), (Int(seconds.truncatingRemainder(dividingBy: 86_400) / 3600), "hour")]
+        } else {
+            let minutes = Int((seconds / 60).rounded(.up))
+            units = [(minutes / 60, "hour"), (minutes % 60, "minute")]
+        }
+        let words = units.filter { $0.0 > 0 }.map { "\($0.0) \($0.1)\($0.0 == 1 ? "" : "s")" }
+        return words.isEmpty ? "less than a minute" : words.joined(separator: " ")
     }
 }

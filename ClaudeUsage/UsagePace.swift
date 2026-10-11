@@ -65,7 +65,7 @@ nonisolated extension UsagePace.Verdict {
         case .full(let date):
             let style = Date.FormatStyle(locale: locale, timeZone: timeZone)
             let time = date.formatted(style.hour().minute())
-            if date.timeIntervalSince(now) < 24 * 3600 {
+            if ResetWording.daysAhead(of: date, from: now, timeZone: timeZone) == 0 {
                 return "100% by \(time)"
             }
             return "100% by \(date.formatted(style.weekday(.abbreviated))) \(time)"
