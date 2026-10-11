@@ -41,6 +41,9 @@ private struct GeneralSettingsView: View {
     @AppStorage(SettingsKeys.showSessionPercentInMenuBar)
     private var showSessionPercent: Bool
 
+    @AppStorage(SettingsKeys.showPaceOnBars)
+    private var showPaceOnBars: Bool
+
     @AppStorage(SettingsKeys.pollIntervalSeconds)
     private var pollIntervalSeconds: Int
 
@@ -101,6 +104,20 @@ private struct GeneralSettingsView: View {
                 }
             } header: {
                 Text("Menu Bar")
+            }
+
+            Section {
+                Toggle(isOn: $showPaceOnBars) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Show pace on usage bars")
+                        Text("Mark how much of each window has passed, and say whether you're on pace or when you'd reach 100% at your current rate.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            } header: {
+                Text("Popover")
             }
 
             Section {

@@ -20,6 +20,8 @@ nonisolated struct SettingKey<Value: Sendable>: Sendable {
 nonisolated enum SettingsKeys {
     static let hasCompletedOnboarding = SettingKey(name: "hasCompletedOnboarding", defaultValue: false)
     static let showSessionPercentInMenuBar = SettingKey(name: "showSessionPercentInMenuBar", defaultValue: false)
+    /// The elapsed-window tick and on-pace verdict on each quota bar.
+    static let showPaceOnBars = SettingKey(name: "showPaceOnBars", defaultValue: true)
     /// Seconds between background polls. `UsageStore` falls back to the default
     /// for anything outside 120–300.
     static let pollIntervalSeconds = SettingKey(name: "pollIntervalSeconds", defaultValue: 300)
