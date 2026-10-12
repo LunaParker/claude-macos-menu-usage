@@ -10,7 +10,6 @@
 //
 
 import AppKit
-import ServiceManagement
 import SwiftUI
 import UserNotifications
 
@@ -45,9 +44,6 @@ private struct GeneralSettingsView: View {
     @AppStorage(SettingsKeys.showPaceOnBars)
     private var showPaceOnBars: Bool
 
-    @AppStorage(SettingsKeys.pollIntervalSeconds)
-    private var pollIntervalSeconds: Int
-
     @AppStorage(SettingsKeys.preferredBrowserBundleID)
     private var preferredBrowserBundleID: String
 
@@ -58,49 +54,23 @@ private struct GeneralSettingsView: View {
     @AppStorage(SettingsKeys.serviceStatusHideWhenOperational)
     private var serviceStatusHideWhenOperational: Bool
 
-    @Environment(UsageStore.self) private var usage
-
     @State private var browsers: [BrowserHelper.BrowserInfo] = []
 
-    /// Mirrors `SMAppService.mainApp.status == .enabled`. Initialised from
-    /// the live status on first appearance rather than stored locally —
-    /// the system is the source of truth because the user can flip this
-    /// themselves in System Settings → General → Login Items.
-    @State private var launchAtLogin: Bool = false
-
-    /// Populated when `register()` / `unregister()` throws, or when the
-    /// system reports `.requiresApproval` after a register attempt. Shown
-    /// as a caption under the toggle so the user understands what to do.
-    @State private var launchAtLoginMessage: String?
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Form {
             Section {
-                Toggle(isOn: launchAtLoginBinding) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Launch at login")
-                        Text("Automatically start Menu Bar Usage for Claude when you log in to your Mac.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        if let launchAtLoginMessage {
-                            Text(launchAtLoginMessage)
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                }
+                LaunchAtLoginToggle()
             } header: {
                 Text("General")
             }
 
             Section {
                 Picker(selection: $menuBarMetric) {
-                    Text("Off").tag(MenuBarMetric.off)
-                    Text("Highest quota").tag(MenuBarMetric.highest)
-                    Text("Current session").tag(MenuBarMetric.session)
-                    Text("Weekly limit").tag(MenuBarMetric.weekly)
-                    Text("Model weekly limit").tag(MenuBarMetric.scopedWeekly)
+                    ForEach(MenuBarMetric.allCases, id: \.self) { metric in
+                        Text(metric.title).tag(metric)
+                    }
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Show in menu bar")
@@ -169,21 +139,7 @@ private struct GeneralSettingsView: View {
             .disabled(!serviceStatusEnabled)
 
             Section {
-                Picker(selection: $pollIntervalSeconds) {
-                    Text("2 minutes").tag(120)
-                    Text("3 minutes").tag(180)
-                    Text("4 minutes").tag(240)
-                    Text("5 minutes").tag(300)
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Refresh every")
-                        Text("How often Menu Bar Usage for Claude polls Claude’s usage endpoint in the background. Shorter intervals show fresher data but are more likely to be rate-limited.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .pickerStyle(.menu)
+                PollIntervalSlider()
             } header: {
                 Text("Polling")
             }
@@ -207,71 +163,25 @@ private struct GeneralSettingsView: View {
             } header: {
                 Text("Browser")
             }
+
+            Section {
+                Button("Run Setup Again…") {
+                    openWindow(id: WindowIDs.onboarding)
+                    NSApp.activate()
+                }
+            } header: {
+                Text("Setup")
+            } footer: {
+                Text("Walks through what the menu bar shows, usage alerts, service status and how often to refresh.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .formStyle(.grouped)
         .onAppear {
             browsers = BrowserHelper.installedBrowsers()
-            refreshLaunchAtLoginStatus()
         }
-        .onChange(of: pollIntervalSeconds) { _, _ in
-            // Cancel the current sleep and start a new one at the new
-            // cadence so the change takes effect right away instead of
-            // after the existing sleep finishes (up to 5 minutes later).
-            usage.reschedulePolling()
-        }
-    }
-
-    private var launchAtLoginBinding: Binding<Bool> {
-        Binding(
-            get: { launchAtLogin },
-            set: { setLaunchAtLogin($0) }
-        )
-    }
-
-    private func refreshLaunchAtLoginStatus() {
-        launchAtLogin = SMAppService.mainApp.status == .enabled
-    }
-
-    private func setLaunchAtLogin(_ enabled: Bool) {
-        launchAtLoginMessage = nil
-        do {
-            if enabled {
-                try SMAppService.mainApp.register()
-            } else {
-                try SMAppService.mainApp.unregister()
-            }
-        } catch {
-            launchAtLoginMessage = "Couldn’t update login item: \(error.localizedDescription)"
-        }
-
-        // Re-read the live status instead of trusting the toggle value —
-        // if registration succeeded but the user hasn't approved login
-        // items yet, the system will report `.requiresApproval`.
-        let status = SMAppService.mainApp.status
-        launchAtLogin = (status == .enabled)
-
-        switch status {
-        case .requiresApproval:
-            launchAtLoginMessage = "Approval needed. Open System Settings → General → Login Items & Extensions and enable Menu Bar Usage for Claude."
-        case .notFound:
-            launchAtLoginMessage = "macOS can’t find the app bundle. Move Menu Bar Usage for Claude into /Applications and try again."
-        default:
-            break
-        }
-    }
-}
-
-private struct MonitoredServiceToggle: View {
-    let component: KnownComponent
-    @AppStorage private var isOn: Bool
-
-    init(component: KnownComponent) {
-        self.component = component
-        _isOn = AppStorage(component.setting)
-    }
-
-    var body: some View {
-        Toggle(component.displayName, isOn: $isOn)
     }
 }
 
@@ -293,7 +203,7 @@ private struct NotificationsSettingsView: View {
         Form {
             if notifications.authorizationStatus != .authorized {
                 Section {
-                    authorizationBanner
+                    NotificationAuthorizationBanner()
                 }
             }
 
@@ -357,45 +267,11 @@ private struct NotificationsSettingsView: View {
             get: { binding.wrappedValue },
             set: { newValue in
                 binding.wrappedValue = newValue
-                if newValue && notifications.authorizationStatus == .notDetermined {
-                    Task { await notifications.requestAuthorization() }
+                if newValue {
+                    notifications.requestAuthorizationIfNeeded()
                 }
             }
         )
-    }
-
-    @ViewBuilder
-    private var authorizationBanner: some View {
-        let status = notifications.authorizationStatus
-        VStack(alignment: .leading, spacing: 8) {
-            Label {
-                if status == .notDetermined {
-                    Text("Notifications have not been enabled yet.")
-                } else {
-                    Text("Notifications are disabled for this app.")
-                }
-            } icon: {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-            }
-
-            Text(status == .notDetermined
-                 ? "Enable notifications to receive usage alerts. You can also just flip a toggle below — macOS will ask for permission automatically."
-                 : "Notifications were previously denied. You can re-enable them in System Settings.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if status == .notDetermined {
-                Button("Enable Notifications") {
-                    Task { await notifications.requestAuthorization() }
-                }
-            } else if status == .denied {
-                Button("Open Notification Settings…") {
-                    notifications.openNotificationSettings()
-                }
-            }
-        }
     }
 }
 

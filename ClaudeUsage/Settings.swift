@@ -24,7 +24,7 @@ nonisolated enum SettingsKeys {
     /// The elapsed-window tick and on-pace verdict on each quota bar.
     static let showPaceOnBars = SettingKey(name: "showPaceOnBars", defaultValue: true)
     /// Seconds between background polls. `UsageStore` falls back to the default
-    /// for anything outside 120–300.
+    /// for anything outside 120–900 (`PollInterval`).
     static let pollIntervalSeconds = SettingKey(name: "pollIntervalSeconds", defaultValue: 300)
 
     static let notifyAt50Percent = SettingKey(name: "notifyAt50Percent", defaultValue: false)

@@ -50,9 +50,10 @@ struct MenuBarUsageForClaudeApp: App {
         }
         .menuBarExtraStyle(.window)
 
-        Window("Welcome to Menu Bar Usage for Claude", id: WindowIDs.onboarding) {
+        Window("Menu Bar Usage for Claude Setup", id: WindowIDs.onboarding) {
             OnboardingWindowView()
                 .environment(usage)
+                .environment(notifications)
         }
         .windowResizability(.contentSize)
 

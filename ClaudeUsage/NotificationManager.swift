@@ -160,6 +160,13 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, Usa
         await refreshAuthorizationStatus()
     }
 
+    /// Asks macOS for permission the first time an alert is switched on, so the
+    /// system prompt appears without a separate button press.
+    func requestAuthorizationIfNeeded() {
+        guard authorizationStatus == .notDetermined else { return }
+        Task { await requestAuthorization() }
+    }
+
     /// Opens System Settings → Notifications so the user can re-enable
     /// notifications after previously denying them.
     func openNotificationSettings() {
