@@ -107,7 +107,6 @@ final class UsageStore {
 
     /// Allowed poll interval, in seconds. Below two minutes the endpoint's rate
     /// limiter starts to bite (anthropics/claude-code#31021).
-    private static let pollIntervalRange = 120...300
 
     /// Popover opens and wakes within this long of a success show the existing snapshot.
     private let popoverDebounceInterval: TimeInterval = 60
@@ -123,9 +122,8 @@ final class UsageStore {
     }
 
     /// Read on every tick, so a change in Settings applies to the next sleep.
-    private var pollInterval: Duration {
-        let stored = dependencies.defaults[SettingsKeys.pollIntervalSeconds]
-        return .seconds(Self.pollIntervalRange.contains(stored) ? stored : SettingsKeys.pollIntervalSeconds.defaultValue)
+    var pollInterval: Duration {
+        .seconds(PollInterval.effectiveSeconds(stored: dependencies.defaults[SettingsKeys.pollIntervalSeconds]))
     }
 
     /// 30 s after the first transient failure, doubling each time, never

@@ -17,6 +17,16 @@ nonisolated enum MenuBarMetric: String, CaseIterable, Sendable {
     case session
     case weekly
     case scopedWeekly
+
+    var title: String {
+        switch self {
+        case .off: "Off"
+        case .highest: "Highest quota"
+        case .session: "Current session"
+        case .weekly: "Weekly limit"
+        case .scopedWeekly: "Model weekly limit"
+        }
+    }
 }
 
 nonisolated struct MenuBarContent: Equatable, Sendable {
