@@ -26,11 +26,11 @@ If you're a Claude Pro or Max subscriber and you use Claude Code, you probably w
 - **Claude service status** — an optional row in the popover summarising [status.claude.com](https://status.claude.com) for the services you pick (claude.ai and Claude Code by default), with links to active incidents.
 - **Resilient refreshing** — a network blip keeps the last bars on screen with a note saying why they may be stale, and the app retries within 30 seconds. When Claude Code's token expires, the app has Claude Code refresh it in the background, and only tells you if that doesn't work. Polling pauses while your displays sleep, so the app doesn't wake the network overnight.
 - **Tabbed Settings window** (`General`, `Notifications`, `Developer`):
-  - Launch at login (via `SMAppService.mainApp`), which quota the menu bar shows, the pace marker, refresh interval (2 / 3 / 4 / 5 minutes, default 5), service-status options and the browser web links open in
+  - Launch at login (via `SMAppService.mainApp`), which quota the menu bar shows, the pace marker, the refresh interval (a slider from 2 to 15 minutes, default 5), service-status options, the browser web links open in, and Run Setup Again
   - Usage alert thresholds, which quotas they watch, and notification permission
   - Live diagnostic counters, store state, token-refresh state, the Keychain read method, Copy Last Response (the raw usage JSON), Force Refresh, a test notification, a simulated outage and a factory reset
 - **Diagnostic log** — a window of timestamped Keychain, API, refresh, status and sleep/wake events, also written to `~/Library/Logs/ClaudeUsage/diagnostic.log` and the unified log (subsystem `com.shyowlstudios.ClaudeUsage`).
-- **First-run onboarding window** — a dedicated Welcome window that explains what the app does before the first Keychain access is attempted.
+- **First-run setup** — a Welcome page that explains what the app does before the first Keychain access, then a few optional questions with live previews: what the menu bar shows, which usage alerts you want, whether to show Claude's service status (and for which services), how often to refresh, and launch at login. Run it again any time from Settings.
 - **Live rate-limit countdown** — when the endpoint responds with HTTP 429, the popover shows a real-time "Retrying in 4m 23s" countdown, with a minimum 60-second cooldown floor to protect the endpoint even if the server returns `Retry-After: 0`.
 
 ## Authentication
@@ -67,7 +67,7 @@ ClaudeUsage/
 │   ├── DiagnosticLog*.swift            # Diagnostic log and its window
 │   ├── UsagePopoverView.swift          # Menu bar popover
 │   ├── SettingsView.swift              # Settings window
-│   └── …                               # Onboarding, menu bar label, settings keys, helpers
+│   └── …                               # Setup window and pages, menu bar label, settings keys, helpers
 ├── ClaudeUsageTests/                   # Swift Testing suites
 └── scripts/deploy.sh                   # Release build, install to ~/Applications, relaunch
 ```
