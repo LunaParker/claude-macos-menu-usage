@@ -82,9 +82,11 @@ struct OnboardingWindowView: View {
                     .frame(minWidth: 100)
             }
             .buttonStyle(.borderedProminent)
-            .controlSize(.large)
             .keyboardShortcut(.defaultAction)
         }
+        // One size and shape for every footer button; macOS draws large buttons as capsules.
+        .controlSize(.large)
+        .buttonBorderShape(.capsule)
     }
 
     private func primaryTitle(_ step: SetupStep) -> String {
