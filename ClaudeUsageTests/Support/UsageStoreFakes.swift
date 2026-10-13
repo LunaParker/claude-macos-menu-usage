@@ -107,24 +107,32 @@ final class FakeNotifier: UsageNotifying {
     func evaluateThresholds(snapshot: UsageSnapshot) { evaluated.append(snapshot) }
 }
 
-/// Holds scheduled work until the test runs it.
+/// Holds scheduled work until the test runs it, all at once or by the clock.
 final class ManualScheduler: Scheduler {
     private final class Item {
         let delay: Duration
+        let dueAt: Date
         let work: @MainActor () async -> Void
         var cancelled = false
-        init(delay: Duration, work: @escaping @MainActor () async -> Void) {
+        init(delay: Duration, dueAt: Date, work: @escaping @MainActor () async -> Void) {
             self.delay = delay
+            self.dueAt = dueAt
             self.work = work
         }
     }
 
+    private let now: () -> Date
     private var items: [Item] = []
+
+    init(now: @escaping () -> Date = Date.init) {
+        self.now = now
+    }
 
     var pendingDelays: [Duration] { items.filter { !$0.cancelled }.map(\.delay) }
 
     func schedule(after delay: Duration, _ work: @escaping @MainActor () async -> Void) -> ScheduledWork {
-        let item = Item(delay: delay, work: work)
+        let seconds = Double(delay.components.seconds) + Double(delay.components.attoseconds) / 1e18
+        let item = Item(delay: delay, dueAt: now().addingTimeInterval(seconds), work: work)
         items.append(item)
         return ScheduledWork { item.cancelled = true }
     }
@@ -133,6 +141,16 @@ final class ManualScheduler: Scheduler {
     func runPending() async {
         let due = items.filter { !$0.cancelled }
         items.removeAll()
+        for item in due {
+            await item.work()
+        }
+    }
+
+    /// Runs the work whose delay has elapsed on the clock, in the order it was scheduled.
+    func runDue() async {
+        let now = now()
+        let due = items.filter { !$0.cancelled && $0.dueAt <= now }
+        items.removeAll { $0.cancelled || $0.dueAt <= now }
         for item in due {
             await item.work()
         }
@@ -150,23 +168,31 @@ final class StoreHarness {
     let fetcher = FakeFetcher()
     let refresher = FakeRefresher()
     let notifier = FakeNotifier()
-    let scheduler = ManualScheduler()
     let display = FakeDisplay()
-    let clock = TestClock()
+    let clock: TestClock
+    /// Runs on the same clock as the store, so `runDue()` follows `clock.advance`.
+    let scheduler: ManualScheduler
     let defaults: UserDefaults = {
         let defaults = TestDefaults.make()
         defaults.set(true, forKey: SettingsKeys.hasCompletedOnboarding.name)
         return defaults
     }()
 
-    func makeStore() -> UsageStore {
+    init() {
+        let clock = TestClock()
+        self.clock = clock
+        scheduler = ManualScheduler(now: { clock.now })
+    }
+
+    /// `scheduler` swaps in a real one for tests about live task behaviour.
+    func makeStore(scheduler: (any Scheduler)? = nil) -> UsageStore {
         let clock = self.clock
         return UsageStore(dependencies: .init(
             credentials: keychain.source,
             fetcher: fetcher,
             refresher: refresher,
             notifier: notifier,
-            scheduler: scheduler,
+            scheduler: scheduler ?? self.scheduler,
             display: display,
             now: { clock.now },
             defaults: defaults

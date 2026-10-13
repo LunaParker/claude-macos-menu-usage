@@ -92,7 +92,8 @@ final class UsageStore {
     private(set) var lastNetworkAttemptAt: Date?
 
     @ObservationIgnored private let dependencies: Dependencies
-    @ObservationIgnored private var pollTask: Task<Void, Never>?
+    @ObservationIgnored private var pollWork: ScheduledWork?
+    @ObservationIgnored private var isPolling = false
     @ObservationIgnored private var retryWork: ScheduledWork?
     @ObservationIgnored private var authWork: ScheduledWork?
     @ObservationIgnored private var wakeWork: ScheduledWork?
@@ -104,9 +105,6 @@ final class UsageStore {
     /// Reading credentials launches `security`, so they're cached until the
     /// token expires or the API rejects it.
     @ObservationIgnored private var cachedCredentials: ClaudeCredentials?
-
-    /// Allowed poll interval, in seconds. Below two minutes the endpoint's rate
-    /// limiter starts to bite (anthropics/claude-code#31021).
 
     /// Popover opens and wakes within this long of a success show the existing snapshot.
     private let popoverDebounceInterval: TimeInterval = 60
@@ -121,7 +119,7 @@ final class UsageStore {
         dependencies.display.onWake = { [weak self] in self?.displaysWoke() }
     }
 
-    /// Read on every tick, so a change in Settings applies to the next sleep.
+    /// Read whenever a poll is booked, so a change in Settings applies at once.
     var pollInterval: Duration {
         .seconds(PollInterval.effectiveSeconds(stored: dependencies.defaults[SettingsKeys.pollIntervalSeconds]))
     }
@@ -135,22 +133,42 @@ final class UsageStore {
 
     // MARK: Lifecycle
 
-    /// Starts the background poll loop. A second call while polling is a no-op.
+    /// Fetches now and keeps polling. A second call while polling is a no-op.
     func startPolling() {
-        guard pollTask == nil else { return }
-        pollTask = makePollTask(fetchImmediately: true)
+        guard !isPolling else { return }
+        isPolling = true
+        pollWork = dependencies.scheduler.schedule(after: .zero) { [weak self] in
+            await self?.poll()
+        }
     }
 
     func stopPolling() {
-        pollTask?.cancel()
-        pollTask = nil
+        isPolling = false
+        pollWork?.cancel()
+        pollWork = nil
     }
 
-    /// Restarts the poll loop at the current interval without fetching now.
+    /// Books the next poll one interval from now, without fetching.
     func reschedulePolling() {
-        guard pollTask != nil else { return }
-        stopPolling()
-        pollTask = makePollTask(fetchImmediately: false)
+        guard isPolling else { return }
+        scheduleNextPoll()
+    }
+
+    private func poll() async {
+        // This booking has fired; cancelling it now would cancel the poll itself.
+        pollWork = nil
+        await refresh(trigger: .poll)
+        scheduleNextPoll()
+    }
+
+    /// The next poll comes a full interval after now. Every success books it
+    /// too, so a popover open or a retry replaces a poll instead of adding one.
+    private func scheduleNextPoll() {
+        guard isPolling else { return }
+        pollWork?.cancel()
+        pollWork = dependencies.scheduler.schedule(after: pollInterval) { [weak self] in
+            await self?.poll()
+        }
     }
 
     /// Called when the user opens the popover.
@@ -190,20 +208,6 @@ final class UsageStore {
         networkRequestCount = 0
         lastNetworkAttemptAt = nil
         diagnosticsStartedAt = dependencies.now()
-    }
-
-    private func makePollTask(fetchImmediately: Bool) -> Task<Void, Never> {
-        Task { [weak self] in
-            var shouldFetch = fetchImmediately
-            while !Task.isCancelled {
-                guard let self else { return }
-                if shouldFetch {
-                    await self.refresh(trigger: .poll)
-                }
-                shouldFetch = true
-                try? await Task.sleep(for: self.pollInterval)
-            }
-        }
     }
 
     /// The latest raw response, for the Developer tab's Copy button.
@@ -368,6 +372,7 @@ final class UsageStore {
         retryWork?.cancel()
         retryWork = nil
         consecutiveTransientFailures = 0
+        scheduleNextPoll()
 
         let snapshot = Self.buildSnapshot(from: response, fetchedAt: dependencies.now())
         self.snapshot = snapshot

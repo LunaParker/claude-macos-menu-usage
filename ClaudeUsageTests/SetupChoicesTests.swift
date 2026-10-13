@@ -14,25 +14,25 @@ import Testing
 @Suite("PollInterval")
 struct PollIntervalTests {
 
-    @Test("the slider stops at 2, 3, 4, 5, 10 and 15 minutes")
+    @Test("the slider stops at 5, 10 and 15 minutes")
     func stops() {
-        #expect(PollInterval.stops == [120, 180, 240, 300, 600, 900])
+        #expect(PollInterval.stops == [300, 600, 900])
     }
 
     @Test("a stored value sits on the nearest stop", arguments: [
-        (120, 0), (100, 0), (170, 1), (300, 3), (420, 3), (500, 4), (900, 5), (2_000, 5),
+        (300, 0), (180, 0), (420, 0), (500, 1), (600, 1), (800, 2), (900, 2), (2_000, 2),
     ])
     func nearestStop(seconds: Int, index: Int) {
         #expect(PollInterval.stopIndex(nearestTo: seconds) == index)
     }
 
-    @Test("labels read in minutes", arguments: [(120, "2 minutes"), (300, "5 minutes"), (900, "15 minutes")])
+    @Test("labels read in minutes", arguments: [(300, "5 minutes"), (600, "10 minutes"), (900, "15 minutes")])
     func labels(seconds: Int, label: String) {
         #expect(PollInterval.label(seconds: seconds) == label)
     }
 
-    @Test("the store honours 2 to 15 minutes and falls back to 5 outside it", arguments: [
-        (120, 120), (150, 150), (600, 600), (900, 900), (60, 300), (1_200, 300), (0, 300),
+    @Test("the store honours 5 to 15 minutes and falls back to 5 outside it", arguments: [
+        (300, 300), (450, 450), (600, 600), (900, 900), (120, 300), (180, 300), (299, 300), (1_200, 300), (0, 300),
     ])
     func effectiveInterval(stored: Int, effective: Int) {
         #expect(PollInterval.effectiveSeconds(stored: stored) == effective)

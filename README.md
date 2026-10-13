@@ -10,7 +10,7 @@ Built with SwiftUI, `MenuBarExtra`, and Observation for macOS 26+.
 
 ## Purpose
 
-If you're a Claude Pro or Max subscriber and you use Claude Code, you probably want to know how much of your current-session, weekly, and — on Max plans — Fable quotas you have left — without having to open Claude Desktop, context-switch into a terminal, or run `/status` inside an active session. This app puts those bars in your menu bar, refreshes them every 2–5 minutes in the background, and optionally displays the current session percentage next to the menu bar icon.
+If you're a Claude Pro or Max subscriber and you use Claude Code, you probably want to know how much of your current-session, weekly, and — on Max plans — Fable quotas you have left — without having to open Claude Desktop, context-switch into a terminal, or run `/status` inside an active session. This app puts those bars in your menu bar, refreshes them every 5 to 15 minutes in the background, and optionally displays the current session percentage next to the menu bar icon.
 
 ## Features
 
@@ -26,7 +26,7 @@ If you're a Claude Pro or Max subscriber and you use Claude Code, you probably w
 - **Claude service status** — an optional row in the popover summarising [status.claude.com](https://status.claude.com) for the services you pick (claude.ai and Claude Code by default), with links to active incidents.
 - **Resilient refreshing** — a network blip keeps the last bars on screen with a note saying why they may be stale, and the app retries within 30 seconds. When Claude Code's token expires, the app has Claude Code refresh it in the background, and only tells you if that doesn't work. Polling pauses while your displays sleep, so the app doesn't wake the network overnight.
 - **Tabbed Settings window** (`General`, `Notifications`, `Developer`):
-  - Launch at login (via `SMAppService.mainApp`), which quota the menu bar shows, the pace marker, the refresh interval (a slider from 2 to 15 minutes, default 5), service-status options, the browser web links open in, and Run Setup Again
+  - Launch at login (via `SMAppService.mainApp`), which quota the menu bar shows, the pace marker, the refresh interval (a slider over 5, 10 and 15 minutes, default 5; opening the popover restarts the countdown), service-status options, the browser web links open in, and Run Setup Again
   - Usage alert thresholds, which quotas they watch, and notification permission
   - Live diagnostic counters, store state, token-refresh state, the Keychain read method, Copy Last Response (the raw usage JSON), Force Refresh, a test notification, a simulated outage and a factory reset
 - **Diagnostic log** — a window of timestamped Keychain, API, refresh, status and sleep/wake events, also written to `~/Library/Logs/ClaudeUsage/diagnostic.log` and the unified log (subsystem `com.shyowlstudios.ClaudeUsage`).

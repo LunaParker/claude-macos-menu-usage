@@ -2,8 +2,8 @@
 //  UsageStoreCancellationTests.swift
 //  ClaudeUsageTests
 //
-//  Cancelling the task that runs a refresh (a poll-interval change, a
-//  Shortcut stopped mid-run) must not read as the network failing.
+//  Cancelling the task that runs a refresh (a Shortcut stopped mid-run)
+//  must not read as the network failing.
 //
 
 import Foundation
