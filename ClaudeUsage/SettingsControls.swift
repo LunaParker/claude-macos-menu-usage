@@ -36,13 +36,13 @@ struct PollIntervalSlider: View {
             .labelsHidden()
             .accessibilityLabel("Refresh interval")
             .accessibilityValue(label)
-            Text("Usage is fetched in the background at this pace; alerts and the menu bar update with it. Shorter intervals are more likely to be rate-limited.")
+            Text("Usage is fetched in the background at this pace, and opening the popover fetches too and restarts the countdown. Anthropic rate-limits checks more often than every 5 minutes.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .onChange(of: seconds) { _, _ in
-            // Takes effect now rather than after the current sleep (up to 15 minutes).
+            // Takes effect now rather than when the booked poll comes due (up to 15 minutes).
             usage.reschedulePolling()
         }
     }

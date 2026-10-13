@@ -11,10 +11,10 @@ import Foundation
 
 /// The refresh slider's stops and the range the store honours.
 nonisolated enum PollInterval {
-    /// 2, 3, 4, 5, 10 and 15 minutes. Under 2 the endpoint's rate limit bites;
-    /// 15 keeps the menu bar inside its 30-minute staleness limit.
-    static let stops = [120, 180, 240, 300, 600, 900]
-    static let range = 120...900
+    /// 5, 10 and 15 minutes: 3 drew 429s (Oct 2026), and 15 keeps the menu bar
+    /// inside its 30-minute staleness limit.
+    static let stops = [300, 600, 900]
+    static let range = 300...900
 
     /// A stored value outside the range (an old or hand-edited preference) falls back to the default.
     static func effectiveSeconds(stored: Int) -> Int {

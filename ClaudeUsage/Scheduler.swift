@@ -2,8 +2,8 @@
 //  Scheduler.swift
 //  Menu Bar Usage for Claude
 //
-//  Delayed work on the main actor (retries, post-refresh checks), behind a
-//  protocol so tests can run it on demand.
+//  Delayed work on the main actor (polls, retries, post-refresh checks),
+//  behind a protocol so tests can run it on demand.
 //
 
 import Foundation
