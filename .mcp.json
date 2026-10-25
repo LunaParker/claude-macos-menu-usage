@@ -5,7 +5,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "xcodebuildmcp@latest",
+        "xcodebuildmcp@2.7.0",
         "mcp"
       ],
       "env": {}
