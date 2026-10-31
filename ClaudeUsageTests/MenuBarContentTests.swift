@@ -57,6 +57,48 @@ struct MenuBarContentTests {
         #expect(content.text == "55%")
     }
 
+    @Test("the session metric falls back to the highest bar on a plan without a session")
+    func sessionFallsBackToHighest() {
+        let ultra = UsageSnapshot.snapshot(session: nil, weekly: 0.46, fable: 0.15)
+
+        let content = MenuBarContent(snapshot: ultra, metric: .session, now: now)
+
+        #expect(content.text == "46%")
+        #expect(content.accessibilityLabel == "Menu Bar Usage for Claude, Weekly Limit 46%")
+    }
+
+    @Test("the picker offers only the quotas the account has")
+    func pickerOptions() {
+        let ultra = UsageSnapshot.snapshot(session: nil, fable: 0.15)
+        let maxPlan = UsageSnapshot.snapshot(session: 0.1, fable: 0.15)
+        let pro = UsageSnapshot.snapshot(session: 0.1)
+
+        #expect(MenuBarMetric.options(for: ultra) == [.off, .highest, .weekly, .scopedWeekly])
+        #expect(MenuBarMetric.options(for: maxPlan) == [.off, .highest, .session, .weekly, .scopedWeekly])
+        #expect(MenuBarMetric.options(for: pro) == [.off, .highest, .session, .weekly])
+        // Before data arrives the plan isn't known yet.
+        #expect(MenuBarMetric.options(for: nil) == [.off, .highest, .session, .weekly, .scopedWeekly])
+    }
+
+    @Test("a choice the account can't show resolves to the highest quota; the rest stand")
+    func resolvedChoice() {
+        let ultra = UsageSnapshot.snapshot(session: nil, fable: 0.15)
+        let pro = UsageSnapshot.snapshot(session: 0.1)
+
+        #expect(MenuBarMetric.session.resolved(for: ultra) == .highest)
+        #expect(MenuBarMetric.scopedWeekly.resolved(for: pro) == .highest)
+        #expect(MenuBarMetric.session.resolved(for: pro) == .session)
+        #expect(MenuBarMetric.scopedWeekly.resolved(for: ultra) == .scopedWeekly)
+        #expect(MenuBarMetric.weekly.resolved(for: ultra) == .weekly)
+        #expect(MenuBarMetric.session.resolved(for: nil) == .session)
+    }
+
+    @Test("the model option is named after the account's model limit")
+    func modelOptionTitle() {
+        #expect(MenuBarMetric.scopedWeekly.title(for: .snapshot(fable: 0.15)) == "Fable weekly limit")
+        #expect(MenuBarMetric.scopedWeekly.title(for: nil) == "Model weekly limit")
+    }
+
     @Test("the warning marks a quota at 90–99% that isn't the one shown")
     func warningRule() {
         let nearLimit = UsageSnapshot.snapshot(session: 0.55, weekly: 0.95)

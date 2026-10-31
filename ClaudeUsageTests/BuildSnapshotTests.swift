@@ -3,9 +3,10 @@
 //  ClaudeUsageTests
 //
 //  Covers `UsageStore.buildSnapshot`. Most of the function's complexity is
-//  in the conditional inclusion of the model-scoped weekly bar (presence-
-//  gated on the `limits` array) and the Extra Usage card (requires four
-//  populated fields). These tests pin every "this gets hidden" branch.
+//  in the conditional inclusion of the session bar (absent on verified
+//  Ultra accounts), the model-scoped weekly bar (presence-gated on the
+//  `limits` array) and the Extra Usage card (requires four populated
+//  fields). These tests pin every "this gets hidden" branch.
 //
 
 import Foundation
@@ -15,30 +16,61 @@ import Testing
 @Suite("UsageStore.buildSnapshot")
 struct BuildSnapshotTests {
 
-    // MARK: Always-present bars
+    // MARK: Session and weekly bars
 
-    @Test("session and weekly bars are always built")
-    func sessionAndWeeklyAlwaysPresent() {
+    @Test("the legacy windows alone build the session and weekly bars")
+    func legacyWindowsBuildBothBars() {
         let response = makeResponse(
             fiveHour: .init(utilization: 42, resetsAt: nil),
             sevenDay: .init(utilization: 17, resetsAt: nil)
         )
         let snapshot = UsageStore.buildSnapshot(from: response)
 
-        #expect(snapshot.session.fraction == 0.42)
+        #expect(snapshot.session?.fraction == 0.42)
         #expect(snapshot.weekly.fraction == 0.17)
     }
 
-    @Test("nil utilisation collapses to a zero-fraction bar")
-    func nilUtilisationIsZero() {
+    @Test("nil utilisation: no session bar, an empty weekly bar")
+    func nilUtilisation() {
         let response = makeResponse(
             fiveHour: .init(utilization: nil, resetsAt: nil),
             sevenDay: .init(utilization: nil, resetsAt: nil)
         )
         let snapshot = UsageStore.buildSnapshot(from: response)
 
-        #expect(snapshot.session.fraction == 0)
+        #expect(snapshot.session == nil)
         #expect(snapshot.weekly.fraction == 0)
+    }
+
+    // Shaped like the 2026-10-31 response for a verified Ultra account: no
+    // `five_hour` window and no `session` entry, only the two weekly limits.
+    @Test("a verified Ultra account has no session bar")
+    func ultraHasNoSession() {
+        let weeklyReset = Date(timeIntervalSince1970: 1_793_674_799)
+        let response = makeResponse(
+            fiveHour: nil,
+            sevenDay: .init(utilization: 46, resetsAt: weeklyReset),
+            limits: [
+                LimitEntry(kind: "weekly_all", percent: 46, resetsAt: weeklyReset, scope: nil),
+                fableLimit(percent: 15),
+            ]
+        )
+        let snapshot = UsageStore.buildSnapshot(from: response)
+
+        #expect(snapshot.session == nil)
+        #expect(snapshot.bars.map(\.id) == [.weekly, .scopedWeekly])
+        #expect(snapshot.peakUtilization == 0.46)
+    }
+
+    @Test("a session entry in the limits array is a session, with or without five_hour")
+    func sessionEntryWithoutFiveHour() {
+        let response = makeResponse(
+            fiveHour: nil,
+            limits: [LimitEntry(kind: "session", percent: 12, resetsAt: nil, scope: nil)]
+        )
+        let snapshot = UsageStore.buildSnapshot(from: response)
+
+        #expect(snapshot.session?.fraction == 0.12)
     }
 
     @Test("utilisation above 100 is clamped to 1.0")
@@ -49,7 +81,7 @@ struct BuildSnapshotTests {
         )
         let snapshot = UsageStore.buildSnapshot(from: response)
 
-        #expect(snapshot.session.fraction == 1)
+        #expect(snapshot.session?.fraction == 1)
         #expect(snapshot.weekly.fraction == 1)
     }
 
@@ -61,7 +93,7 @@ struct BuildSnapshotTests {
         )
         let snapshot = UsageStore.buildSnapshot(from: response)
 
-        #expect(snapshot.session.fraction == 0)
+        #expect(snapshot.session?.fraction == 0)
     }
 
     // MARK: Model-scoped weekly bar (Fable)
@@ -89,8 +121,8 @@ struct BuildSnapshotTests {
         )
         let snapshot = UsageStore.buildSnapshot(from: response)
 
-        #expect(snapshot.session.fraction == 0.61)
-        #expect(snapshot.session.resetsAt == sessionReset)
+        #expect(snapshot.session?.fraction == 0.61)
+        #expect(snapshot.session?.resetsAt == sessionReset)
         #expect(snapshot.weekly.fraction == 0.59)
         #expect(snapshot.weekly.resetsAt == weeklyReset)
     }
@@ -104,7 +136,7 @@ struct BuildSnapshotTests {
         )
         let snapshot = UsageStore.buildSnapshot(from: response)
 
-        #expect(snapshot.session.fraction == 0.10)
+        #expect(snapshot.session?.fraction == 0.10)
         #expect(snapshot.weekly.fraction == 0.20)
         #expect(snapshot.scopedWeekly?.title == "Fable")
     }
@@ -317,7 +349,7 @@ struct BuildSnapshotTests {
     }
 
     /// A `weekly_scoped` limits entry shaped like the API returns for the
-    /// Fable quota on Max plans.
+    /// Fable quota on Max and Ultra plans.
     private func fableLimit(percent: Double? = 30) -> LimitEntry {
         LimitEntry(
             kind: "weekly_scoped",

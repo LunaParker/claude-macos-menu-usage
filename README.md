@@ -1,6 +1,6 @@
 # Menu Bar Usage for Claude
 
-A native macOS menu bar app that tracks your Claude Code usage quotas: the same progress bars that Claude Desktop shows (*Current Session*, *Weekly Limit*, and *Fable* on Max plans), available at a glance from the menu bar without having to open Claude Desktop or run `claude /status` in a terminal.
+A native macOS menu bar app that tracks your Claude Code usage quotas: the same progress bars that Claude Desktop shows (*Current Session* where your plan has one, *Weekly Limit*, and *Fable* on Max and Ultra plans), available at a glance from the menu bar without having to open Claude Desktop or run `claude /status` in a terminal.
 
 Built with SwiftUI, `MenuBarExtra`, and Observation for macOS 26+.
 
@@ -10,19 +10,19 @@ Built with SwiftUI, `MenuBarExtra`, and Observation for macOS 26+.
 
 ## Purpose
 
-If you're a Claude Pro or Max subscriber and you use Claude Code, you probably want to know how much of your current-session, weekly, and (on Max plans) Fable quotas you have left, without having to open Claude Desktop, context-switch into a terminal, or run `/status` inside an active session. This app puts those bars in your menu bar, refreshes them every 5 to 15 minutes in the background, and optionally displays the current session percentage next to the menu bar icon.
+If you're a Claude Pro, Max or Ultra subscriber and you use Claude Code, you probably want to know how much of your current-session, weekly, and Fable quotas (whichever your plan has) you have left, without having to open Claude Desktop, context-switch into a terminal, or run `/status` inside an active session. This app puts those bars in your menu bar, refreshes them every 5 to 15 minutes in the background, and optionally displays a quota's percentage next to the menu bar icon.
 
 ## Features
 
 - **Live quota bars** that mirror Claude Desktop:
-  - **Current Session**: the 5-hour rolling window
+  - **Current Session**: the 5-hour rolling window (Pro and Max; verified Ultra accounts don't have one, so the bar appears only when the API reports a session)
   - **Weekly Limit**: the 7-day rolling all-models window
-  - **Fable**: the model-scoped 7-day window (Max 5x/20x plans only; the bar appears whenever the API reports a model-scoped weekly limit and is titled by the API, so it follows any future rename)
+  - **Fable**: the model-scoped 7-day window (Max and Ultra plans; the bar appears whenever the API reports a model-scoped weekly limit and is titled by the API, so it follows any future rename)
 - **Pace marker**: a tick on each bar shows how much of its window has passed, and the caption says "On pace" or when you'd hit 100% at your current rate, so a mid-week 50% reads as fine or as a warning. Optional: turn it off under General → Popover.
 - **Read-only Extra Usage card**: appears automatically when you enable Extra Usage at [claude.ai/settings/usage](https://claude.ai/settings/usage). Shows used vs. monthly cap, credits remaining, and a link back to the web UI for management.
-- **Menu bar gauge icon** with an SF Symbol that tints itself based on peak utilisation (0% / 33% / 67% / 100%), plus an optional percentage next to it for the quota you pick: the highest, the session, the weekly limit or the Fable limit. While any quota is used up, the menu bar counts down to its reset instead ("↻ 1:12").
-- **Usage alerts**: optional notifications at 50%, 75% and 90% of the session, the weekly limit and the Fable weekly limit, each at most once per window per quota (even across relaunches) and saying when that quota resets, plus an optional alert when a quota that hit 100% resets.
-- **Shortcuts, Spotlight and Siri**: "Get Claude Usage" returns the session, weekly and Fable percentages with their reset times (and Extra Usage when enabled) as a value whose details Shortcuts can pull apart; "Refresh Claude Usage" fetches first. "Check my Claude usage" works from Spotlight and Siri without building a shortcut.
+- **Menu bar gauge icon** with an SF Symbol that tints itself based on peak utilisation (0% / 33% / 67% / 100%), plus an optional percentage next to it for the quota you pick: the highest, the session, the weekly limit or the Fable limit. The choices follow your plan, and a pick your plan doesn't have shows the highest quota instead. While any quota is used up, the menu bar counts down to its reset instead ("↻ 1:12").
+- **Usage alerts**: optional notifications at 50%, 75% and 90% of the session, the weekly limit and the Fable weekly limit (each where your plan has it), each at most once per window per quota (even across relaunches) and saying when that quota resets, plus an optional alert when a quota that hit 100% resets.
+- **Shortcuts, Spotlight and Siri**: "Get Claude Usage" returns the session, weekly and Fable percentages your plan has, with their reset times (and Extra Usage when enabled) as a value whose details Shortcuts can pull apart; "Refresh Claude Usage" fetches first. "Check my Claude usage" works from Spotlight and Siri without building a shortcut.
 - **Claude service status**: an optional row in the popover summarising [status.claude.com](https://status.claude.com) for the services you pick (claude.ai and Claude Code by default), with links to active incidents.
 - **Resilient refreshing**: a network blip keeps the last bars on screen with a note saying why they may be stale, and the app retries within 30 seconds. When Claude Code's token expires, the app has Claude Code refresh it in the background, and only tells you if that doesn't work. Polling pauses while your displays sleep, so the app doesn't wake the network overnight.
 - **Tabbed Settings window** (`General`, `Notifications`, `Developer`):

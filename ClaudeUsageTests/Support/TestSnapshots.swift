@@ -32,8 +32,9 @@ enum TestSnapshots {
 }
 
 extension UsageSnapshot {
+    /// `session: nil` is a plan without a session window, like a verified Ultra account.
     static func snapshot(
-        session: Double = 0.1,
+        session: Double? = 0.1,
         sessionResetsAt: Date? = TestSnapshots.sessionWindow,
         weekly: Double = 0.1,
         weeklyResetsAt: Date? = TestSnapshots.weeklyWindow,
@@ -41,7 +42,7 @@ extension UsageSnapshot {
         fableResetsAt: Date? = TestSnapshots.weeklyWindow
     ) -> UsageSnapshot {
         UsageSnapshot(
-            session: TestSnapshots.bar(.session, "Current Session", session, sessionResetsAt),
+            session: session.map { TestSnapshots.bar(.session, "Current Session", $0, sessionResetsAt) },
             weekly: TestSnapshots.bar(.weekly, "Weekly Limit", weekly, weeklyResetsAt),
             scopedWeekly: fable.map { TestSnapshots.bar(.scopedWeekly, "Fable", $0, fableResetsAt) },
             extraUsage: nil,

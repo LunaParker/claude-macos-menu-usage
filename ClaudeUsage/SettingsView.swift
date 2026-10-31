@@ -38,6 +38,8 @@ struct SettingsView: View {
 // MARK: - General
 
 private struct GeneralSettingsView: View {
+    @Environment(UsageStore.self) private var usage
+
     @AppStorage(SettingsKeys.menuBarMetric)
     private var menuBarMetric: MenuBarMetric
 
@@ -59,6 +61,8 @@ private struct GeneralSettingsView: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
+        // The last good data, even if stale, says which quotas the account has.
+        let known = usage.snapshot
         Form {
             Section {
                 LaunchAtLoginToggle()
@@ -67,9 +71,9 @@ private struct GeneralSettingsView: View {
             }
 
             Section {
-                Picker(selection: $menuBarMetric) {
-                    ForEach(MenuBarMetric.allCases, id: \.self) { metric in
-                        Text(metric.title).tag(metric)
+                Picker(selection: $menuBarMetric.resolved(for: known)) {
+                    ForEach(MenuBarMetric.options(for: known), id: \.self) { metric in
+                        Text(metric.title(for: known)).tag(metric)
                     }
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
@@ -222,12 +226,17 @@ private struct NotificationsSettingsView: View {
             }
 
             Section {
-                alertToggle($notifyForSession, "Current session", "The 5-hour session window.", requestsAuthorization: false)
+                alertToggle(
+                    $notifyForSession,
+                    "Current session",
+                    "The 5-hour session window. Verified Ultra accounts don't have one.",
+                    requestsAuthorization: false
+                )
                 alertToggle($notifyForWeekly, "Weekly limit", "The 7-day limit across all models.", requestsAuthorization: false)
                 alertToggle(
                     $notifyForScopedWeekly,
                     "Model weekly limit",
-                    "The model-specific weekly quota, currently Fable on Max 5x and 20x plans. Only applies when your plan has one.",
+                    "The model-specific weekly quota, currently Fable on Max 5x and Ultra plans. Only applies when your plan has one.",
                     requestsAuthorization: false
                 )
             } header: {

@@ -49,7 +49,7 @@ struct UsageStoreIntentTests {
 
         let snapshot = try await store.currentUsage(refreshFirst: false)
 
-        #expect(snapshot.session.fraction == 0.42)
+        #expect(snapshot.session?.fraction == 0.42)
         #expect(harness.fetcher.tokens.count == 1)
     }
 
@@ -62,7 +62,7 @@ struct UsageStoreIntentTests {
 
         let snapshot = try await store.currentUsage(refreshFirst: true)
 
-        #expect(snapshot.session.fraction == 0.77)
+        #expect(snapshot.session?.fraction == 0.77)
         #expect(harness.fetcher.tokens.count == 2)
     }
 
@@ -79,7 +79,7 @@ struct UsageStoreIntentTests {
 
         let snapshot = try await store.currentUsage(refreshFirst: false)
 
-        #expect(snapshot.session.fraction == 0.42)
+        #expect(snapshot.session?.fraction == 0.42)
         #expect(harness.fetcher.tokens.count == 1)
         await poll.value
     }
