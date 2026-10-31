@@ -1,6 +1,6 @@
 # Menu Bar Usage for Claude
 
-A native macOS menu bar app that tracks your Claude Code usage quotas — the same progress bars that Claude Desktop shows (*Current Session* where your plan has one, *Weekly Limit*, and — on Max and Ultra plans — *Fable*), available at a glance from the menu bar without having to open Claude Desktop or run `claude /status` in a terminal.
+A native macOS menu bar app that tracks your Claude Code usage quotas: the same progress bars that Claude Desktop shows (*Current Session* where your plan has one, *Weekly Limit*, and *Fable* on Max and Ultra plans), available at a glance from the menu bar without having to open Claude Desktop or run `claude /status` in a terminal.
 
 Built with SwiftUI, `MenuBarExtra`, and Observation for macOS 26+.
 
@@ -10,28 +10,28 @@ Built with SwiftUI, `MenuBarExtra`, and Observation for macOS 26+.
 
 ## Purpose
 
-If you're a Claude Pro, Max or Ultra subscriber and you use Claude Code, you probably want to know how much of your weekly, current-session and Fable quotas (whichever your plan has) you have left — without having to open Claude Desktop, context-switch into a terminal, or run `/status` inside an active session. This app puts those bars in your menu bar, refreshes them every 5 to 15 minutes in the background, and optionally displays a quota's percentage next to the menu bar icon.
+If you're a Claude Pro, Max or Ultra subscriber and you use Claude Code, you probably want to know how much of your current-session, weekly, and Fable quotas (whichever your plan has) you have left, without having to open Claude Desktop, context-switch into a terminal, or run `/status` inside an active session. This app puts those bars in your menu bar, refreshes them every 5 to 15 minutes in the background, and optionally displays a quota's percentage next to the menu bar icon.
 
 ## Features
 
 - **Live quota bars** that mirror Claude Desktop:
-  - **Current Session** — the 5-hour rolling window (Pro and Max; verified Ultra accounts don't have one, so the bar appears only when the API reports a session)
-  - **Weekly Limit** — the 7-day rolling all-models window
-  - **Fable** — the model-scoped 7-day window (Max and Ultra plans; the bar appears whenever the API reports a model-scoped weekly limit and is titled by the API, so it follows any future rename)
-- **Pace marker** — a tick on each bar shows how much of its window has passed, and the caption says "On pace" or when you'd hit 100% at your current rate, so a mid-week 50% reads as fine or as a warning. Optional: turn it off under General → Popover.
-- **Read-only Extra Usage card** — appears automatically when you enable Extra Usage at [claude.ai/settings/usage](https://claude.ai/settings/usage). Shows used vs. monthly cap, credits remaining, and a link back to the web UI for management.
+  - **Current Session**: the 5-hour rolling window (Pro and Max; verified Ultra accounts don't have one, so the bar appears only when the API reports a session)
+  - **Weekly Limit**: the 7-day rolling all-models window
+  - **Fable**: the model-scoped 7-day window (Max and Ultra plans; the bar appears whenever the API reports a model-scoped weekly limit and is titled by the API, so it follows any future rename)
+- **Pace marker**: a tick on each bar shows how much of its window has passed, and the caption says "On pace" or when you'd hit 100% at your current rate, so a mid-week 50% reads as fine or as a warning. Optional: turn it off under General → Popover.
+- **Read-only Extra Usage card**: appears automatically when you enable Extra Usage at [claude.ai/settings/usage](https://claude.ai/settings/usage). Shows used vs. monthly cap, credits remaining, and a link back to the web UI for management.
 - **Menu bar gauge icon** with an SF Symbol that tints itself based on peak utilisation (0% / 33% / 67% / 100%), plus an optional percentage next to it for the quota you pick: the highest, the session, the weekly limit or the Fable limit. The choices follow your plan, and a pick your plan doesn't have shows the highest quota instead. While any quota is used up, the menu bar counts down to its reset instead ("↻ 1:12").
-- **Usage alerts** — optional notifications at 50%, 75% and 90% of the session, the weekly limit and the Fable weekly limit (each where your plan has it), each at most once per window per quota (even across relaunches) and saying when that quota resets, plus an optional alert when a quota that hit 100% resets.
-- **Shortcuts, Spotlight and Siri** — "Get Claude Usage" returns the weekly, session and Fable percentages your plan has, with their reset times (and Extra Usage when enabled) as a value whose details Shortcuts can pull apart; "Refresh Claude Usage" fetches first. "Check my Claude usage" works from Spotlight and Siri without building a shortcut.
-- **Claude service status** — an optional row in the popover summarising [status.claude.com](https://status.claude.com) for the services you pick (claude.ai and Claude Code by default), with links to active incidents.
-- **Resilient refreshing** — a network blip keeps the last bars on screen with a note saying why they may be stale, and the app retries within 30 seconds. When Claude Code's token expires, the app has Claude Code refresh it in the background, and only tells you if that doesn't work. Polling pauses while your displays sleep, so the app doesn't wake the network overnight.
+- **Usage alerts**: optional notifications at 50%, 75% and 90% of the session, the weekly limit and the Fable weekly limit (each where your plan has it), each at most once per window per quota (even across relaunches) and saying when that quota resets, plus an optional alert when a quota that hit 100% resets.
+- **Shortcuts, Spotlight and Siri**: "Get Claude Usage" returns the session, weekly and Fable percentages your plan has, with their reset times (and Extra Usage when enabled) as a value whose details Shortcuts can pull apart; "Refresh Claude Usage" fetches first. "Check my Claude usage" works from Spotlight and Siri without building a shortcut.
+- **Claude service status**: an optional row in the popover summarising [status.claude.com](https://status.claude.com) for the services you pick (claude.ai and Claude Code by default), with links to active incidents.
+- **Resilient refreshing**: a network blip keeps the last bars on screen with a note saying why they may be stale, and the app retries within 30 seconds. When Claude Code's token expires, the app has Claude Code refresh it in the background, and only tells you if that doesn't work. Polling pauses while your displays sleep, so the app doesn't wake the network overnight.
 - **Tabbed Settings window** (`General`, `Notifications`, `Developer`):
   - Launch at login (via `SMAppService.mainApp`), which quota the menu bar shows, the pace marker, the refresh interval (a slider over 5, 10 and 15 minutes, default 5; opening the popover restarts the countdown), service-status options, the browser web links open in, and Run Setup Again
   - Usage alert thresholds, which quotas they watch, and notification permission
   - Live diagnostic counters, store state, token-refresh state, the Keychain read method, Copy Last Response (the raw usage JSON), Force Refresh, a test notification, a simulated outage and a factory reset
-- **Diagnostic log** — a window of timestamped Keychain, API, refresh, status and sleep/wake events, also written to `~/Library/Logs/ClaudeUsage/diagnostic.log` and the unified log (subsystem `com.shyowlstudios.ClaudeUsage`).
-- **First-run setup** — a Welcome page that explains what the app does before the first Keychain access, then a few optional questions with live previews: what the menu bar shows, which usage alerts you want, whether to show Claude's service status (and for which services), how often to refresh, and launch at login. Run it again any time from Settings.
-- **Live rate-limit countdown** — when the endpoint responds with HTTP 429, the popover shows a real-time "Retrying in 4m 23s" countdown, with a minimum 60-second cooldown floor to protect the endpoint even if the server returns `Retry-After: 0`.
+- **Diagnostic log**: a window of timestamped Keychain, API, refresh, status and sleep/wake events, also written to `~/Library/Logs/ClaudeUsage/diagnostic.log` and the unified log (subsystem `com.shyowlstudios.ClaudeUsage`).
+- **First-run setup**: a Welcome page that explains what the app does before the first Keychain access, then a few optional questions with live previews: what the menu bar shows, which usage alerts you want, whether to show Claude's service status (and for which services), how often to refresh, and launch at login. Run it again any time from Settings.
+- **Live rate-limit countdown**: when the endpoint responds with HTTP 429, the popover shows a real-time "Retrying in 4m 23s" countdown, with a minimum 60-second cooldown floor to protect the endpoint even if the server returns `Retry-After: 0`.
 
 ## Authentication
 
@@ -39,7 +39,7 @@ The app reuses the OAuth credentials that the `claude` CLI already wrote to your
 
 Specifically:
 
-- **Keychain item.** `kSecClassGenericPassword` with service name `Claude Code-credentials`, created by Claude Code when you first run `claude` → `/login`. The data is a JSON blob containing an OAuth access token, refresh token, expiry, scopes, and subscription tier. The app reads it via `/usr/bin/security find-generic-password` — this binary is already on the keychain item's ACL, so reads succeed silently without triggering a macOS Keychain access prompt. Falls back to `SecItemCopyMatching` (which may prompt) if the CLI approach fails. If the Keychain item is missing entirely, the app reads `~/.claude/.credentials.json`, where Claude Code keeps the same credentials whenever it can't write to the Keychain.
+- **Keychain item.** `kSecClassGenericPassword` with service name `Claude Code-credentials`, created by Claude Code when you first run `claude` → `/login`. The data is a JSON blob containing an OAuth access token, refresh token, expiry, scopes, and subscription tier. The app reads it via `/usr/bin/security find-generic-password`. This binary is already on the keychain item's ACL, so reads succeed silently without triggering a macOS Keychain access prompt. Falls back to `SecItemCopyMatching` (which may prompt) if the CLI approach fails. If the Keychain item is missing entirely, the app reads `~/.claude/.credentials.json`, where Claude Code keeps the same credentials whenever it can't write to the Keychain.
 - **Endpoint.** `GET https://api.anthropic.com/api/oauth/usage`, with headers `Authorization: Bearer <accessToken>` and `anthropic-beta: oauth-2025-04-20`. Returns the session and weekly utilisation windows, a generalised `limits` array (the only source of the model-scoped Fable quota), and the Extra Usage state. This is the same endpoint the `claude` CLI's status line hits. Requests go through an ephemeral session with no URL cache, so neither the token nor the responses are written to disk.
 - **Token refresh.** When the access token expires, the app runs `claude mcp list` in the background, which makes Claude Code refresh its own token and write the new one to the Keychain. It launches `claude` directly when it can find it, falling back to your login shell. It runs it in a private, empty folder, never in a shared one like `/tmp`.
 - **Sandbox:** Disabled because the app needs to launch `/usr/bin/security` to read keychain items created by Claude Code, and sandboxed apps cannot spawn arbitrary processes. As such, this app can't be published to the App Store.
@@ -76,14 +76,14 @@ ClaudeUsage/
 
 - **`UsageStore`** is the single source of truth, an `@Observable @MainActor` class that owns the background poll task, the fetch and background-refresh state, and the diagnostic counters. Views observe it via `@Environment(UsageStore.self)`. It takes its collaborators (credential source, fetcher, refresher, notifier, scheduler, display state, clock) as injected dependencies, so the tests drive it with fakes.
 - **`MenuBarLabel.task`** is the only place the app starts polling. If onboarding hasn't been completed, it opens the `OnboardingWindowView` instead of touching the Keychain, so the very first credential read happens only after the user clicks Continue.
-- **One refresh path** — the background loop, popover opens (debounced 60 s), manual refreshes, quick retries, post-refresh checks and display wakes all go through `refresh(trigger:)`, which guards against re-entrancy, display sleep, the debounce and the 429 cooldown.
-- **Scenes** — the app declares four SwiftUI scenes: `MenuBarExtra` for the menu bar popover, `Window`s for the onboarding flow and the diagnostic log, and `Settings` for the preferences window.
+- **One refresh path**: the background loop, popover opens (debounced 60 s), manual refreshes, quick retries, post-refresh checks and display wakes all go through `refresh(trigger:)`, which guards against re-entrancy, display sleep, the debounce and the 429 cooldown.
+- **Scenes**: the app declares four SwiftUI scenes: `MenuBarExtra` for the menu bar popover, `Window`s for the onboarding flow and the diagnostic log, and `Settings` for the preferences window.
 
 ## Build
 
 ### Requirements
 
-- macOS 26 (Tahoe) or later — the deployment target is `MACOSX_DEPLOYMENT_TARGET = 26.4`
+- macOS 26 (Tahoe) or later, with a deployment target of `MACOSX_DEPLOYMENT_TARGET = 26.4`
 - Xcode 26.4 or later
 - Claude Code installed and signed in:
   ```sh
@@ -111,7 +111,7 @@ On first launch after a build:
 
 ### Production deployment
 
-For day-to-day use outside of Xcode, copy the built **`Menu Bar Usage for Claude.app`** into `/Applications` (or `~/Applications`), then launch it from there. This matters for the **Launch at login** feature — `SMAppService.mainApp` registers the current bundle path with LaunchServices, so registering from a DerivedData location causes `.notFound` errors on next login. `scripts/deploy.sh` does the whole round trip: it builds Release into `./build`, quits the running copy, replaces `~/Applications/Menu Bar Usage for Claude.app` and relaunches it.
+For day-to-day use outside of Xcode, copy the built **`Menu Bar Usage for Claude.app`** into `/Applications` (or `~/Applications`), then launch it from there. This matters for the **Launch at login** feature: `SMAppService.mainApp` registers the current bundle path with LaunchServices, so registering from a DerivedData location causes `.notFound` errors on next login. `scripts/deploy.sh` does the whole round trip: it builds Release into `./build`, quits the running copy, replaces `~/Applications/Menu Bar Usage for Claude.app` and relaunches it.
 
 ### Tests
 
@@ -123,8 +123,8 @@ The tests are hosted in the app, which recognises the test run and skips its lau
 
 ## Alternatives
 
-- **[Notch Pilot](https://github.com/devmegablaster/Notch-Pilot)** — A macOS app that displays Claude Code usage in the Dynamic Island / notch area. Notch Pilot also reads from the same undocumented usage endpoint and inspired our `/usr/bin/security`-based keychain reading approach, which avoids the macOS Keychain access prompt entirely.
+- **[Notch Pilot](https://github.com/devmegablaster/Notch-Pilot)**: a macOS app that displays Claude Code usage in the Dynamic Island / notch area. Notch Pilot also reads from the same undocumented usage endpoint and inspired our `/usr/bin/security`-based keychain reading approach, which avoids the macOS Keychain access prompt entirely.
 
 ## License
 
-MIT — see [LICENSE.md](LICENSE.md).
+MIT. See [LICENSE.md](LICENSE.md).
