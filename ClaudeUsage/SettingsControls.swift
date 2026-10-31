@@ -11,6 +11,14 @@ import ServiceManagement
 import SwiftUI
 import UserNotifications
 
+extension Binding<MenuBarMetric> {
+    /// For the menu bar pickers: shows the choice the menu bar actually displays
+    /// for these quotas, and stores a pick as is.
+    func resolved(for snapshot: UsageSnapshot?) -> Binding<MenuBarMetric> {
+        Binding(get: { wrappedValue.resolved(for: snapshot) }, set: { wrappedValue = $0 })
+    }
+}
+
 /// The refresh interval as a slider over `PollInterval.stops`. Reschedules
 /// polling on change, wherever it's shown.
 struct PollIntervalSlider: View {

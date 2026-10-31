@@ -131,7 +131,7 @@ private struct WelcomePage: View {
                 OnboardingWindowRow(
                     icon: "chart.bar.xaxis",
                     title: "Your quota bars, just like Claude Desktop",
-                    detail: "Current session, weekly limit, and — on Max plans — your weekly Fable allowance."
+                    detail: "Your weekly limit, plus the current session and the weekly Fable allowance when your plan has them."
                 )
 
                 OnboardingWindowRow(

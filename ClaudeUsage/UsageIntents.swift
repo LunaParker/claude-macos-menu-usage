@@ -13,7 +13,7 @@ import Foundation
 struct ClaudeUsageEntity: TransientAppEntity {
     static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Claude Usage")
 
-    @Property(title: "Session Percent") var sessionPercent: Int
+    @Property(title: "Session Percent") var sessionPercent: Int?
     @Property(title: "Session Resets At") var sessionResetsAt: Date?
     @Property(title: "Weekly Percent") var weeklyPercent: Int
     @Property(title: "Weekly Resets At") var weeklyResetsAt: Date?
@@ -27,8 +27,8 @@ struct ClaudeUsageEntity: TransientAppEntity {
     init() {}
 
     init(snapshot: UsageSnapshot) {
-        sessionPercent = Self.percent(snapshot.session.fraction)
-        sessionResetsAt = snapshot.session.resetsAt
+        sessionPercent = snapshot.session.map { Self.percent($0.fraction) }
+        sessionResetsAt = snapshot.session?.resetsAt
         weeklyPercent = Self.percent(snapshot.weekly.fraction)
         weeklyResetsAt = snapshot.weekly.resetsAt
         modelName = snapshot.scopedWeekly?.title
@@ -40,7 +40,8 @@ struct ClaudeUsageEntity: TransientAppEntity {
     }
 
     var displayRepresentation: DisplayRepresentation {
-        var title = "Session \(sessionPercent)% · Weekly \(weeklyPercent)%"
+        var title = sessionPercent.map { "Session \($0)% · " } ?? ""
+        title += "Weekly \(weeklyPercent)%"
         if let modelName, let modelPercent {
             title += " · \(modelName) \(modelPercent)%"
         }
@@ -72,7 +73,7 @@ struct ClaudeUsageEntity: TransientAppEntity {
 
 struct GetClaudeUsageIntent: AppIntent {
     static let title: LocalizedStringResource = "Get Claude Usage"
-    static let description = IntentDescription("The current session, weekly and model usage, with when each resets.")
+    static let description = IntentDescription("The weekly, session and model usage your plan has, with when each resets.")
 
     @Dependency private var usage: UsageStore
 

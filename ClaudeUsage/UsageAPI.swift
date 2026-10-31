@@ -42,7 +42,7 @@ struct ExtraUsageResponse: Decodable, Sendable {
 
 /// One entry in the generalised `limits` array — the successor to the
 /// per-model `seven_day_*` fields. The model-scoped weekly quota
-/// (currently Fable, Max 5x/20x plans only) is exposed *only* here;
+/// (currently Fable, Max 5x and Ultra plans) is exposed *only* here;
 /// there is no legacy `seven_day_fable` field. `percent` is an integer
 /// 0…100 on the wire, and `scope.model.display_name` carries the
 /// user-facing name for the scoped model.

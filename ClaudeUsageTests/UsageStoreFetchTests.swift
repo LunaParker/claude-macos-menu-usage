@@ -21,7 +21,7 @@ struct UsageStoreFetchTests {
 
         await store.refresh()
 
-        #expect(store.snapshot?.session.fraction == 0.42)
+        #expect(store.snapshot?.session?.fraction == 0.42)
         #expect(store.failure == nil)
         #expect(store.lastUpdated == harness.clock.now)
         #expect(harness.notifier.evaluated.count == 1)
@@ -36,7 +36,7 @@ struct UsageStoreFetchTests {
         harness.fetcher.responses = [.failure(.transport(URLError(.notConnectedToInternet)))]
         await store.refresh()
 
-        #expect(store.snapshot?.session.fraction == 0.42)
+        #expect(store.snapshot?.session?.fraction == 0.42)
         guard case .offline = store.failure else {
             Issue.record("expected .offline, got \(String(describing: store.failure))")
             return
@@ -55,7 +55,7 @@ struct UsageStoreFetchTests {
 
         await harness.scheduler.runPending()
 
-        #expect(store.snapshot?.session.fraction == 0.5)
+        #expect(store.snapshot?.session?.fraction == 0.5)
         #expect(store.failure == nil)
         #expect(harness.scheduler.pendingDelays.isEmpty)
     }
@@ -110,7 +110,7 @@ struct UsageStoreFetchTests {
         await store.refresh()
 
         #expect(harness.fetcher.tokens == ["token-1", "token-1", "token-2"])
-        #expect(store.snapshot?.session.fraction == 0.6)
+        #expect(store.snapshot?.session?.fraction == 0.6)
         #expect(store.failure == nil)
         #expect(harness.notifier.lost == 0)
     }

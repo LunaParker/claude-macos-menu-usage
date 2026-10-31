@@ -62,9 +62,9 @@ struct MenuBarSetupPage: View {
             subtitle: "A percentage beside the gauge. While a quota is used up, the menu bar counts down to its reset instead."
         ) {
             HStack(alignment: .top, spacing: 28) {
-                Picker("Show in menu bar", selection: $metric) {
-                    ForEach(options(live: live), id: \.self) { option in
-                        Text(title(for: option, live: live)).tag(option)
+                Picker("Show in menu bar", selection: $metric.resolved(for: live)) {
+                    ForEach(MenuBarMetric.options(for: live), id: \.self) { option in
+                        Text(option == .off ? "Just the gauge" : option.title(for: live)).tag(option)
                     }
                 }
                 .pickerStyle(.radioGroup)
@@ -104,22 +104,6 @@ struct MenuBarSetupPage: View {
             QuotaBarView(bar: snapshot.weekly)
                 .padding(14)
                 .background(.quinary, in: RoundedRectangle(cornerRadius: 10))
-        }
-    }
-
-    /// The model option only when the plan has that limit (or before data arrives),
-    /// and always when it's the current choice.
-    private func options(live: UsageSnapshot?) -> [MenuBarMetric] {
-        MenuBarMetric.allCases.filter { option in
-            option != .scopedWeekly || live == nil || live?.scopedWeekly != nil || metric == .scopedWeekly
-        }
-    }
-
-    private func title(for option: MenuBarMetric, live: UsageSnapshot?) -> String {
-        switch option {
-        case .off: "Just the gauge"
-        case .scopedWeekly: live?.scopedWeekly.map { "\($0.title) weekly limit" } ?? option.title
-        default: option.title
         }
     }
 }
@@ -167,10 +151,12 @@ struct AlertsSetupPage: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 SetupGroupLabel(text: "For")
-                Toggle("Current session", isOn: $notifyForSession)
+                if live == nil || live?.session != nil {
+                    Toggle("Current session", isOn: $notifyForSession)
+                }
                 Toggle("Weekly limit", isOn: $notifyForWeekly)
                 if live == nil || live?.scopedWeekly != nil {
-                    Toggle(live?.scopedWeekly.map { "\($0.title) weekly limit" } ?? "Model weekly limit (Max plans)", isOn: $notifyForScopedWeekly)
+                    Toggle(live?.scopedWeekly.map { "\($0.title) weekly limit" } ?? "Model weekly limit (Max and Ultra plans)", isOn: $notifyForScopedWeekly)
                 }
             }
             .toggleStyle(.checkbox)

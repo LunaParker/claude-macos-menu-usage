@@ -42,6 +42,16 @@ struct ClaudeUsageEntityTests {
         #expect(entity.extraUsageRemaining == nil)
     }
 
+    @Test("leaves the session empty on a plan without one")
+    func noSession() {
+        let entity = ClaudeUsageEntity(snapshot: .snapshot(session: nil, weekly: 0.46, fable: 0.15))
+
+        #expect(entity.sessionPercent == nil)
+        #expect(entity.sessionResetsAt == nil)
+        #expect(entity.weeklyPercent == 46)
+        #expect(String(localized: entity.displayRepresentation.title) == "Weekly 46% · Fable 15%")
+    }
+
     @Test("the spoken summary names each quota and when it resets")
     func spokenSummary() {
         let locale = Locale(identifier: "en_US")
@@ -58,6 +68,10 @@ struct ClaudeUsageEntityTests {
         let tomorrow = UsageSnapshot.snapshot(session: 0.55, sessionResetsAt: TestSnapshots.now.addingTimeInterval(23 * 3600), weekly: 0.3)
         #expect(ClaudeUsageEntity.summary(of: tomorrow, now: TestSnapshots.now, locale: locale, timeZone: timeZone)
                 == "Session 55%, resets tomorrow at 2:00\u{202F}AM. Weekly 30%, resets Monday at 3:00\u{202F}AM.")
+
+        let ultra = UsageSnapshot.snapshot(session: nil, weekly: 0.46, fable: 0.15)
+        #expect(ClaudeUsageEntity.summary(of: ultra, now: TestSnapshots.now, locale: locale, timeZone: timeZone)
+                == "Weekly 46%, resets Monday at 3:00\u{202F}AM. Fable 15%, resets Monday at 3:00\u{202F}AM.")
     }
 
     @Test("the Shortcuts error text is plain, with no Markdown")

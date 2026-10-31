@@ -27,6 +27,30 @@ nonisolated enum MenuBarMetric: String, CaseIterable, Sendable {
         case .scopedWeekly: "Model weekly limit"
         }
     }
+
+    /// The picker label: the model option takes the name of the account's model limit.
+    func title(for snapshot: UsageSnapshot?) -> String {
+        if self == .scopedWeekly, let scoped = snapshot?.scopedWeekly {
+            return "\(scoped.title) weekly limit"
+        }
+        return title
+    }
+
+    /// What this choice shows: a quota the account lacks (the session on verified Ultra,
+    /// the model limit on Pro) falls back to the highest. The stored choice stays.
+    func resolved(for snapshot: UsageSnapshot?) -> MenuBarMetric {
+        guard let snapshot else { return self }
+        return switch self {
+        case .session: snapshot.session == nil ? .highest : self
+        case .scopedWeekly: snapshot.scopedWeekly == nil ? .highest : self
+        case .off, .highest, .weekly: self
+        }
+    }
+
+    /// The choices the account's quotas allow; all of them before data arrives.
+    static func options(for snapshot: UsageSnapshot?) -> [MenuBarMetric] {
+        allCases.filter { $0.resolved(for: snapshot) == $0 }
+    }
 }
 
 nonisolated struct MenuBarContent: Equatable, Sendable {
@@ -73,11 +97,11 @@ nonisolated struct MenuBarContent: Equatable, Sendable {
     }
 
     private static func bar(for metric: MenuBarMetric, in snapshot: UsageSnapshot) -> UsageSnapshot.Bar? {
-        switch metric {
+        switch metric.resolved(for: snapshot) {
         case .off: nil
         case .session: snapshot.session
         case .weekly: snapshot.weekly
-        case .scopedWeekly: snapshot.scopedWeekly ?? highest(in: snapshot)
+        case .scopedWeekly: snapshot.scopedWeekly
         case .highest: highest(in: snapshot)
         }
     }

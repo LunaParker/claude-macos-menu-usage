@@ -11,10 +11,12 @@ import Foundation
 
 /// The data the popover actually renders, derived from a `UsageResponse`.
 nonisolated struct UsageSnapshot: Equatable, Sendable {
-    var session: Bar
+    /// The 5-hour session window. Nil when the API reports none: verified
+    /// Ultra accounts have no session limit.
+    var session: Bar?
     var weekly: Bar
-    /// The model-scoped weekly quota (currently the Fable limit on Max
-    /// 5x/20x plans). Nil when the API reports no such limit — the bar
+    /// The model-scoped weekly quota (currently the Fable limit on Max 5x
+    /// and Ultra plans). Nil when the API reports no such limit — the bar
     /// is presence-gated, so plans without the quota never show it.
     var scopedWeekly: Bar?
     var extraUsage: ExtraUsageSummary?
@@ -25,12 +27,12 @@ nonisolated struct UsageSnapshot: Equatable, Sendable {
     /// deliberately excluded: it represents paid overflow, not remaining
     /// free quota, so mixing it into the "peak" would send the wrong signal.
     var peakUtilization: Double {
-        max(session.fraction, weekly.fraction, scopedWeekly?.fraction ?? 0)
+        bars.map(\.fraction).max() ?? 0
     }
 
-    /// The quota bars in display order; the model-scoped one only when present.
+    /// The quota bars in display order; the session and model-scoped ones only when present.
     var bars: [Bar] {
-        [session, weekly] + (scopedWeekly.map { [$0] } ?? [])
+        [session, weekly, scopedWeekly].compactMap { $0 }
     }
 
     struct Bar: Equatable, Sendable, Identifiable {
@@ -73,14 +75,16 @@ extension UsageStore {
         // The `limits` array is the newer description of the same quotas; it
         // wins per bar, with the legacy `five_hour`/`seven_day` windows as fallback.
         let limits = response.limits ?? []
+        // Verified Ultra accounts have no session. As in Claude Code, a window
+        // without a utilization counts as none.
         let session = limits.first { $0.kind == "session" }
             .map { bar(kind: .session, title: "Current Session", utilization: $0.percent, resetsAt: $0.resetsAt) }
-            ?? bar(kind: .session, title: "Current Session", window: response.fiveHour)
+            ?? response.fiveHour.flatMap { $0.utilization == nil ? nil : bar(kind: .session, title: "Current Session", window: $0) }
         let weekly = limits.first { $0.kind == "weekly_all" }
             .map { bar(kind: .weekly, title: "Weekly Limit", utilization: $0.percent, resetsAt: $0.resetsAt) }
             ?? bar(kind: .weekly, title: "Weekly Limit", window: response.sevenDay)
 
-        // The model-scoped weekly quota (currently Fable, Max 5x/20x) exists only
+        // The model-scoped weekly quota (currently Fable, Max 5x and Ultra) exists only
         // as a `weekly_scoped` entry. Presence-gated: no entry, no bar. The title
         // comes from the API so a renamed quota follows along, and if the API
         // ever lists several, the fullest one is shown.
