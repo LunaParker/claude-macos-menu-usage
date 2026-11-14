@@ -101,10 +101,12 @@ final class FakeNotifier: UsageNotifying {
     private(set) var lost = 0
     private(set) var restored = 0
     private(set) var evaluated: [UsageSnapshot] = []
+    private(set) var evaluatedResets: [LimitResets] = []
 
     func authenticationLost() { lost += 1 }
     func authenticationRestored() { restored += 1 }
     func evaluateThresholds(snapshot: UsageSnapshot) { evaluated.append(snapshot) }
+    func evaluateResets(snapshot: UsageSnapshot, resets: LimitResets) { evaluatedResets.append(resets) }
 }
 
 /// Holds scheduled work until the test runs it, all at once or by the clock.
