@@ -31,6 +31,11 @@ ClaudeUsage/
                                    fetch outcomes, background-refresh state machine
   UsageState.swift               — UsageFailure, UsagePresentation, AuthPhase, RefreshPolicy
   UsageAPI.swift                 — Wire format, UsageFetching, UsageAPIClient, date decoding
+  LimitResetsAPI.swift           — Limit resets (`cedar_ember`) wire format, LimitResetsFetching,
+                                   LimitResetsClient
+  LimitResets.swift              — Held resets, ResetVisibility, ResetsPresentation and its wording,
+                                   ResetsRefreshPolicy
+  ResetAlerts.swift              — Limit reset notification decisions, persistence, wording
   UsageSnapshot.swift            — Display model and its builder
   UsageIntents.swift             — App Intents: Get/Refresh Claude Usage, ClaudeUsageEntity,
                                    App Shortcuts phrases
@@ -40,12 +45,13 @@ ClaudeUsage/
   KeychainCredentials.swift      — ClaudeCredentials, CredentialSource/KeychainCredentialSource
                                    (off-main reads), KeychainCredentialStore (security CLI,
                                    SecItemCopyMatching, ~/.claude/.credentials.json)
-  ClaudeCLI.swift                — ClaudeCLILocator, RefreshStrategy, ClaudeCLIRefresher (launch
-                                   + timeout), CredentialRefreshing/ClaudeRefreshService
+  ClaudeCLI.swift                — ClaudeCLILocator, ClaudeCLIVersion, RefreshStrategy,
+                                   ClaudeCLIRefresher (launch + timeout),
+                                   CredentialRefreshing/ClaudeRefreshService
   ProcessRunner.swift            — Short-lived helper processes with a kill timeout
   Scheduler.swift                — Delayed main-actor work behind a protocol (tests run it on demand)
   DisplaySleepMonitor.swift      — Display sleep/wake tracking (DarkWake keeps displays off)
-  NotificationManager.swift      — macOS notifications: usage alerts, auth-lost, test banner
+  NotificationManager.swift      — macOS notifications: usage and reset alerts, auth-lost, test banner
   ThresholdTracker.swift         — Pure alert decisions for one quota's window
   UsageAlerts.swift              — One tracker per quota, persistence, alert wording
   StatusStore.swift              — status.claude.com: components, snapshot, client, store
@@ -53,6 +59,7 @@ ClaudeUsage/
   DiagnosticLogView.swift        — Diagnostic Log window
   UsagePopoverView.swift         — Popover: quota bars, Extra Usage card, failure views, status row,
                                    CapsuleBar, MenuBarPanel
+  LimitResetViews.swift          — Popover: limit reset row and at-limit card
   SettingsView.swift             — Settings window: General, Notifications, Developer tabs
   SettingsControls.swift         — Controls shared by Settings and setup: the menu bar pickers'
                                    resolved binding, PollIntervalSlider, LaunchAtLoginToggle,
@@ -71,7 +78,7 @@ scripts/deploy.sh                — Release build, install to ~/Applications, r
 
 ### Architecture
 
-- **UsageStore** is the single source of truth. All views observe it via `@Environment`. It takes its collaborators through `UsageStore.Dependencies` (credential source, fetcher, refresher, notifier, scheduler, display state, clock, defaults), so the tests drive it with fakes.
+- **UsageStore** is the single source of truth. All views observe it via `@Environment`. It takes its collaborators through `UsageStore.Dependencies` (credential source, fetcher, resets fetcher, installed `claude` version, refresher, notifier, scheduler, display state, clock, defaults), so the tests drive it with fakes.
 - The store keeps `snapshot` (last good data) and `failure` (a typed `UsageFailure`) side by side. `UsagePresentation` decides what the popover shows: failures only the user can fix (signed out, unreadable credentials, sign-in expired, `claude` not found) replace the bars; transient ones (offline, server error, unexpected response, 429, a refresh in progress) keep them with a footer notice. The menu bar keeps the last values through a transient failure but drops data older than 30 minutes.
 - Every refresh goes through `refresh(trigger:)`. Triggers are `.poll`, `.popover` (debounced 60 s against the last success), `.manual` ("Try again", the Reauthenticate notification and Force Refresh, via `manualRetry()`), `.retry`, `.postRefresh`, `.wake` (debounced like `.popover`) and `.intent` (an App Intent: like `.manual`, but skipped while the displays sleep). A cancelled request (a Shortcut stopped mid-run) is not a failure. Guards, in order: re-entrancy (a `.postRefresh` or `.manual` call that arrives mid-refresh reruns once it ends), display sleep (everything except `.manual` is skipped while the displays are asleep), the debounce, then the 429 cooldown.
 - Transient failures retry after 30 s, doubling up to the poll interval; a success cancels the retry.
@@ -85,6 +92,8 @@ scripts/deploy.sh                — Release build, install to ~/Applications, r
 - Onboarding gates polling — Keychain access only happens after the user completes onboarding. The flag is one global key (`hasCompletedOnboarding`); `PreferenceMigrations` carries over the old bundle-path-scoped keys. Migrations run first in `App.init`, before `NotificationManager` loads the alert trackers.
 - **Setup window:** the welcome page's Continue is the consent step: it sets the flag and starts polling, then four optional pages follow (what the menu bar shows, usage alerts, service status, refresh interval and launch at login), each applying its choices as they're made, with live previews once data arrives. Back never returns to the welcome page. "Run Setup Again…" in Settings → General reopens the window at the first setup page (`SetupStep.first`); existing users aren't shown it otherwise. The pages map onto the existing keys through pure types: `AlertPreset` (offers "Custom" when the three threshold switches match no preset, so setup never silently changes them) and `ServiceStatusMode` (Never leaves the degraded-only switch alone).
 - **Poll interval:** a slider over `PollInterval.stops` (5, 10, 15 minutes) in both setup and Settings; it reschedules polling when it changes. The store honours any stored value from 300 to 900 seconds and falls back to 300 otherwise (an old 2–4 minute setting reads as 5 minutes; no migration). Five minutes is the floor: at 3 minutes plus popover opens (29–33 requests an hour, with Claude Code's own `/api/oauth/usage` calls on top) the endpoint sent four 429s in two days, the last with `Retry-After: 3600` (2026-10-11/12), and none in three days at ~4 an hour.
+- **Limit resets** (display only): after a usage success, `ResetsRefreshPolicy` decides whether to check the resets: never checked, an hour since the last attempt, or five minutes since one when a bar dropped, its window moved or it reached 100% (some resets only become usable at a limit). The store keeps `limitResets` (nil before a check or when none are offered), `limitResetsCheckedAt` and `limitResetsUnavailableReason`. A failed resets request keeps the last answer and never touches `failure`, the bars or the 429 cooldown; resets requests count in `networkRequestCount`. Once a first answer is in, each success passes the resets (plus the Developer tab's fake one) to `notifier.evaluateResets`.
+- **Which resets show:** a reset applies to the bars in its `clears` list (`five_hour` → session, `seven_day` → weekly, `seven_day_overage_included` → the model-scoped limit, Claude Code's own mapping), so Fable resets follow only the Fable bar while the weekly reset follows both. `showLimitResets` (General → Popover): Always (default), From 75% used, At the limit, Never; the threshold modes keep a reset when a bar it clears is at or above 75% or 100%. `ResetsPresentation` turns that into one row under the bars (count, and the next to expire), or a card under the first bar at 100% that a surfaced reset clears, naming the most targeted reset (fewest limits cleared, then soonest to expire) with the others as a footnote. The row and card only link to claude.ai/settings/usage.
 - Notification actions go through the store: the app wires `NotificationManager.reauthenticateHandler` to `UsageStore.manualRetry()`, which re-reads the Keychain afterwards. Never launch the refresh directly from a notification.
 
 ## Usage API
@@ -108,6 +117,14 @@ Observed 2026-10-31, after Max 20x became the Ultra plan: `five_hour` null and n
 The response is decoded into a `UsageSnapshot` with pre-computed `Bar` values (fraction 0...1, percent label, reset time). `peakUtilization` (max of all bar fractions) drives the menu bar icon variant.
 
 **Networking:** both API clients send through `HTTPClient`, an ephemeral `URLSession` with no URL cache and no cookie storage. `URLSession.shared` used to write every response, with its request (bearer token included), into `~/Library/Caches/com.shyowlstudios.ClaudeUsage/Cache.db`; launch deletes that cache and sets `URLCache.shared` to zero capacity. The usage request times out after 20 s, the status request after 10 s.
+
+### Limit resets (`cedar_ember`)
+
+The resets claude.ai's Usage page lists ("Weekly reset", "Fable reset · 2") come from the same endpoint: `GET /api/oauth/usage?cedar_ember=1&skip_spend=1` fills a top-level `cedar_ember` block that a plain request leaves null (`skip_spend` drops `spend` and `extra_usage`). The block is only filled for Claude Code's surface: with the app's own User-Agent it answers `eligible: false, ineligible_reason: "surface"`, and `x-app: cli` alone doesn't change that. `LimitResetsClient` therefore sends `User-Agent: claude-cli/<installed version> (external, cli) MenuBarUsageForClaude/<version> (macOS menu bar)` and `x-app: cli`, so Anthropic counts these requests as Claude Code. The version matters (`ineligible_reason` can be `cli_version`): `ClaudeCLIVersion` reads it from the native installer's `versions/<v>` symlink target or npm's `package.json`, never by launching `claude`, and without one nothing is sent. `HTTPClient` keeps a User-Agent the request already set.
+
+- Block fields used: `eligible`, `ineligible_reason`, and per grant `id`, `resets_left`, `starts_at`, `ends_at`, `clears`, `paused`, `usable_now`. A reset counts when it has some left, has started, hasn't expired, isn't paused or cooling down, and clears a limit the app knows. Grants decode leniently.
+- Also present and unused: `at_limit`, `exhausted`, `next_grant_id`, `weekly_resets_at`, `cooldown_until`, `event_props` (surface, tier, tenure), `paused_held`, and per grant `label`, `resets_total`, `type` (`session`/`weekly`/`full`), `gives_back_weekly` (Fable resets: true), `use_requires_limit`, `percent_used`, `blocking`, `arm`, `unavailable_reason`.
+- **Never call the claim endpoint** (`POST /api/organizations/{org}/reset_rate_limits`), in the app or while testing. Resets are used on claude.ai.
 
 **Rate-limit handling:** HTTP 429 responses set a cooldown (`rateLimitedUntil`) using the `Retry-After` header with a 60-second floor (`RateLimitPolicy`). The popover shows a live countdown during cooldown.
 
@@ -159,6 +176,13 @@ OAuth credentials are stored by the `claude` CLI in the macOS login keychain:
   - The fired set is re-seeded with the thresholds already exceeded except the highest, so a launch or new window fires at most one alert
   - `sawCapacity` is cleared
 - **Authorization:** Requests notification permission on first toggle; shows "Open Notification Settings" if previously denied
+
+**Limit reset alerts** (`ResetAlerts`, saved under `resetAlerts`; Notifications → Limit Resets):
+- **Reset available at a limit** (on by default): a watched quota at 100% that a held reset clears, once per window (same 2-second tolerance), naming the most targeted reset.
+- **Reset about to expire** (on): once per reset, from three days before it expires.
+- **New reset** (off): once per reset. The first check only records the resets already held, and new ones are recorded even while the alert is off or permission is missing, so switching it on later can't flood.
+- At-limit and expiry alerts that can't be delivered stay due, like the thresholds. All three use the threshold category, so they carry "Manage Usage". Identifiers: `limit-reset-at-limit-<kind>`, `limit-reset-expiring-<limits>`, `limit-reset-new-<limits>`.
+- Developer → Limit Resets → "Simulate a weekly limit reset" (`simulateLimitReset`) adds a fake reset that clears only the weekly limit and expires eight days after the start of the day, to the popover and these alerts. Nothing is sent to Anthropic.
 
 ## Diagnostic Log
 
