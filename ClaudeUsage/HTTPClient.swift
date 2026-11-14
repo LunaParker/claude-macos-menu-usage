@@ -34,13 +34,16 @@ struct HTTPClient: Sendable {
         "MenuBarUsageForClaude/\(version) (macOS menu bar)"
     }
 
-    private static let userAgentHeader = userAgent(
+    static let appUserAgent = userAgent(
         version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
     )
 
+    /// Stamps the app's User-Agent unless the request already names one.
     func send(_ request: URLRequest) async throws(Failure) -> (Data, HTTPURLResponse) {
         var request = request
-        request.setValue(Self.userAgentHeader, forHTTPHeaderField: "User-Agent")
+        if request.value(forHTTPHeaderField: "User-Agent") == nil {
+            request.setValue(Self.appUserAgent, forHTTPHeaderField: "User-Agent")
+        }
         let data: Data
         let response: URLResponse
         do {
@@ -55,7 +58,7 @@ struct HTTPClient: Sendable {
 
 /// Parses a `Retry-After` header: integer seconds or an HTTP-date. Anything under
 /// one second is nil, so a stray `Retry-After: 0` can't switch a cooldown off.
-enum RetryAfter {
+nonisolated enum RetryAfter {
     static func parse(_ value: String?) -> TimeInterval? {
         guard let value = value?.trimmingCharacters(in: .whitespaces), !value.isEmpty else {
             return nil

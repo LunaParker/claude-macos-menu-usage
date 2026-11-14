@@ -104,7 +104,7 @@ extension UsageResponse {
 }
 
 /// An array decoded element by element; the ones that fail are counted, not fatal.
-struct LenientArray<Element: Decodable>: Decodable {
+nonisolated struct LenientArray<Element: Decodable>: Decodable {
     let elements: [Element]
     let dropped: Int
 
@@ -159,6 +159,20 @@ enum UsageAPIError: LocalizedError {
             return "Couldn’t decode the usage response from Claude."
         }
     }
+
+    /// Maps a non-200 status to its error; both usage endpoint clients use it.
+    static func check(_ response: HTTPURLResponse) throws(UsageAPIError) {
+        switch response.statusCode {
+        case 200:
+            return
+        case 401, 403:
+            throw .unauthorized
+        case 429:
+            throw .rateLimited(retryAfter: RetryAfter.parse(response.value(forHTTPHeaderField: "Retry-After")))
+        default:
+            throw .http(response.statusCode)
+        }
+    }
 }
 
 /// Fetches usage with an access token. `UsageStore` checks expiry first.
@@ -204,17 +218,7 @@ final class UsageAPIClient: UsageFetching {
             }
         }
 
-        switch response.statusCode {
-        case 200:
-            break
-        case 401, 403:
-            throw UsageAPIError.unauthorized
-        case 429:
-            let retryAfter = RetryAfter.parse(response.value(forHTTPHeaderField: "Retry-After"))
-            throw UsageAPIError.rateLimited(retryAfter: retryAfter)
-        default:
-            throw UsageAPIError.http(response.statusCode)
-        }
+        try UsageAPIError.check(response)
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601WithFractionalSeconds
@@ -238,7 +242,7 @@ final class UsageAPIClient: UsageFetching {
 
 // MARK: - ISO-8601 with fractional seconds
 
-private extension JSONDecoder.DateDecodingStrategy {
+extension JSONDecoder.DateDecodingStrategy {
     /// The usage endpoint returns timestamps like `2026-04-11T18:00:01.219127+00:00`,
     /// which the default `.iso8601` strategy rejects because of the microseconds.
     static var iso8601WithFractionalSeconds: JSONDecoder.DateDecodingStrategy {

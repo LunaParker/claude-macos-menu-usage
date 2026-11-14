@@ -60,6 +60,40 @@ nonisolated struct ClaudeCLILocator: Sendable {
     }
 }
 
+/// The installed `claude` version, read from the files an install leaves, never by
+/// launching it: the native installer's `versions/<v>` target, or npm's package.json.
+nonisolated enum ClaudeCLIVersion {
+    static func read(executable: URL) -> String? {
+        let resolved = executable.resolvingSymlinksInPath()
+        if isVersion(resolved.lastPathComponent) { return resolved.lastPathComponent }
+        var folder = resolved.deletingLastPathComponent()
+        for _ in 0..<4 {
+            if let data = try? Data(contentsOf: folder.appendingPathComponent("package.json")),
+               let package = try? JSONDecoder().decode(Package.self, from: data),
+               package.name == "@anthropic-ai/claude-code", let version = package.version, isVersion(version) {
+                return version
+            }
+            folder.deleteLastPathComponent()
+        }
+        return nil
+    }
+
+    /// The installed CLI wherever the locator finds it. Reads files; call it off the main thread.
+    static func installed(defaults: UserDefaults = .standard) -> String? {
+        let cached = defaults.string(forKey: ClaudeCLILocator.cachedPathKey).map { URL(fileURLWithPath: $0) }
+        return ClaudeCLILocator.live.locate(cached: cached).flatMap(read(executable:))
+    }
+
+    static func isVersion(_ text: String) -> Bool {
+        text.wholeMatch(of: /\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?/) != nil
+    }
+
+    private struct Package: Decodable {
+        let name: String?
+        let version: String?
+    }
+}
+
 /// How a refresh attempt starts `claude`.
 nonisolated enum RefreshStrategy: Equatable, Sendable {
     /// Run the binary directly, without sourcing any shell profile.
