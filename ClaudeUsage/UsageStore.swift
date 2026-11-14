@@ -17,6 +17,9 @@ final class UsageStore {
     struct Dependencies {
         var credentials: any CredentialSource
         var fetcher: any UsageFetching
+        var resets: any LimitResetsFetching
+        /// The installed `claude` version, which the resets request has to name.
+        var cliVersion: @Sendable () async -> String?
         var refresher: any CredentialRefreshing
         var notifier: any UsageNotifying
         var scheduler: any Scheduler
@@ -28,6 +31,8 @@ final class UsageStore {
             Dependencies(
                 credentials: KeychainCredentialSource(),
                 fetcher: UsageAPIClient(),
+                resets: LimitResetsClient(),
+                cliVersion: { await Task.detached { ClaudeCLIVersion.installed() }.value },
                 refresher: ClaudeRefreshService(),
                 notifier: notifier,
                 scheduler: LiveScheduler(),
@@ -60,6 +65,13 @@ final class UsageStore {
     private(set) var isRefreshing = false
     private(set) var lastUpdated: Date?
     private(set) var rateLimitedUntil: Date?
+
+    /// The usable limit resets from the last check; nil before one, or when none are offered.
+    private(set) var limitResets: LimitResets?
+    /// When the resets were last checked, whatever the answer.
+    private(set) var limitResetsCheckedAt: Date?
+    /// Why no resets are offered (`surface`, `claude version unknown`), for the Developer tab.
+    private(set) var limitResetsUnavailableReason: String?
 
     /// Where the background token refresh stands.
     private(set) var auth: AuthPhase = .ok
@@ -98,6 +110,7 @@ final class UsageStore {
     @ObservationIgnored private var authWork: ScheduledWork?
     @ObservationIgnored private var wakeWork: ScheduledWork?
     @ObservationIgnored private var consecutiveTransientFailures = 0
+    @ObservationIgnored private var resetsLastAttemptAt: Date?
 
     /// A post-refresh check or manual retry that arrived mid-refresh runs once that ends.
     @ObservationIgnored private var rerunRequested = false
@@ -323,7 +336,9 @@ final class UsageStore {
         do {
             let response = try await dependencies.fetcher.fetch(accessToken: credentials.accessToken)
             DiagnosticLog.shared.log(.api, "HTTP 200 — usage data received")
+            let previous = snapshot
             succeeded(with: response)
+            await refreshResets(previous: previous, accessToken: credentials.accessToken)
         } catch UsageAPIError.rateLimited(let retryAfter) {
             let backoff = rateLimitPolicy.cooldown(retryAfter: retryAfter)
             DiagnosticLog.shared.log(.api, "HTTP 429 — rate limited, backoff \(Int(backoff))s")
@@ -381,6 +396,54 @@ final class UsageStore {
         rateLimitedUntil = nil
         dependencies.notifier.authenticationRestored()
         dependencies.notifier.evaluateThresholds(snapshot: snapshot)
+    }
+
+    // MARK: Limit resets
+
+    /// After a usage success: checks the resets when the policy says so, then
+    /// hands them to the notifier. Its failures never touch the bars or `failure`.
+    private func refreshResets(previous: UsageSnapshot?, accessToken: String) async {
+        guard let current = snapshot else { return }
+        if ResetsRefreshPolicy.isDue(lastAttempt: resetsLastAttemptAt, previous: previous, current: current, now: dependencies.now()) {
+            resetsLastAttemptAt = dependencies.now()
+            await fetchResets(accessToken: accessToken)
+        }
+        // Not before a first answer: the alerts would take every held reset for a new one.
+        guard limitResetsCheckedAt != nil, let snapshot else { return }
+        let simulate = dependencies.defaults[SettingsKeys.simulateLimitReset]
+        let shown = LimitResets.displayed(limitResets, simulate: simulate, now: dependencies.now()) ?? LimitResets(grants: [])
+        dependencies.notifier.evaluateResets(snapshot: snapshot, resets: shown)
+    }
+
+    private func fetchResets(accessToken: String) async {
+        guard let version = await dependencies.cliVersion() else {
+            DiagnosticLog.shared.log(.api, "Limit resets not checked: claude version unknown")
+            limitResets = nil
+            limitResetsUnavailableReason = "claude version unknown"
+            limitResetsCheckedAt = dependencies.now()
+            return
+        }
+        networkRequestCount += 1
+        lastNetworkAttemptAt = dependencies.now()
+        DiagnosticLog.shared.log(.api, "Request #\(networkRequestCount) started (limit resets, claude \(version))")
+        do {
+            let block = try await dependencies.resets.fetchResets(accessToken: accessToken, cliVersion: version)
+            let now = dependencies.now()
+            if let block, block.eligible == true {
+                let resets = LimitResets(block: block, now: now)
+                limitResets = resets
+                limitResetsUnavailableReason = nil
+                DiagnosticLog.shared.log(.api, "Limit resets: \(resets.grants.count) usable of \(block.grants.count) grants")
+            } else {
+                let reason = block.map { $0.ineligibleReason ?? "not offered" } ?? "no resets in the response"
+                limitResets = nil
+                limitResetsUnavailableReason = reason
+                DiagnosticLog.shared.log(.api, "Limit resets not offered: \(reason)")
+            }
+            limitResetsCheckedAt = now
+        } catch {
+            DiagnosticLog.shared.log(.api, "Limit resets request failed: \(error.localizedDescription)")
+        }
     }
 
     /// Keeps the snapshot and retries sooner than the next poll.

@@ -54,6 +54,29 @@ final class FakeFetcher: UsageFetching {
     }
 }
 
+final class FakeResetsFetcher: LimitResetsFetching {
+    /// Consumed in order; the last one repeats.
+    var responses: [Result<LimitResetsBlock?, UsageAPIError>] = [.success(.eligibleSample())]
+    private(set) var calls: [(token: String, version: String)] = []
+
+    func fetchResets(accessToken: String, cliVersion: String) async throws -> LimitResetsBlock? {
+        calls.append((accessToken, cliVersion))
+        let next = responses.count > 1 ? responses.removeFirst() : responses[0]
+        return try next.get()
+    }
+}
+
+/// The installed `claude` version the store's dependency reports.
+nonisolated final class FakeCLIVersion: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: String? = "2.1.322"
+
+    var value: String? {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
+    }
+}
+
 /// Records refresh launches; the test decides when and how each one exits.
 final class FakeRefresher: CredentialRefreshing {
     struct Start {
@@ -168,6 +191,8 @@ final class TestClock {
 final class StoreHarness {
     let keychain = FakeKeychain(.success(TestCredentials.valid(token: "token-1")))
     let fetcher = FakeFetcher()
+    let resets = FakeResetsFetcher()
+    let cliVersion = FakeCLIVersion()
     let refresher = FakeRefresher()
     let notifier = FakeNotifier()
     let display = FakeDisplay()
@@ -189,9 +214,12 @@ final class StoreHarness {
     /// `scheduler` swaps in a real one for tests about live task behaviour.
     func makeStore(scheduler: (any Scheduler)? = nil) -> UsageStore {
         let clock = self.clock
+        let cliVersion = self.cliVersion
         return UsageStore(dependencies: .init(
             credentials: keychain.source,
             fetcher: fetcher,
+            resets: resets,
+            cliVersion: { cliVersion.value },
             refresher: refresher,
             notifier: notifier,
             scheduler: scheduler ?? self.scheduler,
@@ -199,6 +227,15 @@ final class StoreHarness {
             now: { clock.now },
             defaults: defaults
         ))
+    }
+}
+
+extension LimitResetsBlock {
+    /// One weekly reset with no expiry, so it holds whatever the harness clock says.
+    static func eligibleSample() -> LimitResetsBlock {
+        LimitResetsBlock(eligible: true, ineligibleReason: nil, grants: [
+            Grant(id: "weekly", resetsLeft: 1, startsAt: nil, endsAt: nil, clears: ["seven_day", "seven_day_overage_included"], paused: false, usableNow: true),
+        ])
     }
 }
 

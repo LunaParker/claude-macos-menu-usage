@@ -338,3 +338,30 @@ nonisolated struct ResetWords {
         text.prefix(1).uppercased() + text.dropFirst()
     }
 }
+
+// MARK: - Refresh policy
+
+/// When the resets request is due: hourly, or once five minutes have passed
+/// after the usage changed in a way a used or newly usable reset would explain.
+nonisolated enum ResetsRefreshPolicy {
+    static let interval: TimeInterval = 3600
+    static let afterChange: TimeInterval = 300
+
+    static func isDue(lastAttempt: Date?, previous: UsageSnapshot?, current: UsageSnapshot, now: Date) -> Bool {
+        guard let lastAttempt else { return true }
+        let elapsed = now.timeIntervalSince(lastAttempt)
+        if elapsed >= interval { return true }
+        return elapsed >= afterChange && limitsChanged(from: previous, to: current)
+    }
+
+    /// A bar dropped, its window moved, or it just reached 100% (some resets only work at a limit).
+    static func limitsChanged(from previous: UsageSnapshot?, to current: UsageSnapshot) -> Bool {
+        guard let previous else { return false }
+        return current.bars.contains { bar in
+            guard let old = previous.bars.first(where: { $0.id == bar.id }) else { return false }
+            return bar.fraction < old.fraction
+                || !ThresholdTracker.isSameResetTime(old.resetsAt, bar.resetsAt)
+                || (bar.fraction >= 1 && old.fraction < 1)
+        }
+    }
+}
