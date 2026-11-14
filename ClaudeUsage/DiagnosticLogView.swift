@@ -93,6 +93,7 @@ struct DiagnosticLogView: View {
         case .refresh: .purple
         case .status: .teal
         case .power: .indigo
+        case .popover: .gray
         }
     }
 }
