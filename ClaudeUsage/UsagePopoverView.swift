@@ -103,6 +103,9 @@ private struct MainContentView: View {
     @Environment(StatusStore.self) private var status
     @Environment(\.openSettings) private var openSettings
 
+    @AppStorage(SettingsKeys.showLimitResets) private var resetVisibility: ResetVisibility
+    @AppStorage(SettingsKeys.simulateLimitReset) private var simulateLimitReset: Bool
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
@@ -199,13 +202,22 @@ private struct MainContentView: View {
     }
 
     private func loadedView(_ snapshot: UsageSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            if let session = snapshot.session {
-                QuotaBarView(bar: session)
+        let now = Date()
+        let resets = ResetsPresentation.make(
+            resets: LimitResets.displayed(usage.limitResets, simulate: simulateLimitReset, now: now),
+            snapshot: snapshot,
+            visibility: resetVisibility,
+            now: now
+        )
+        return VStack(alignment: .leading, spacing: 14) {
+            ForEach(snapshot.bars) { bar in
+                QuotaBarView(bar: bar)
+                if case .card(let card) = resets, card.bar == bar.id {
+                    LimitResetCard(card: card)
+                }
             }
-            QuotaBarView(bar: snapshot.weekly)
-            if let scoped = snapshot.scopedWeekly {
-                QuotaBarView(bar: scoped)
+            if case .row(let row) = resets {
+                LimitResetRow(row: row)
             }
             if let extra = snapshot.extraUsage {
                 ExtraUsageCard(summary: extra)
