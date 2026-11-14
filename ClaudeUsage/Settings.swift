@@ -23,6 +23,8 @@ nonisolated enum SettingsKeys {
     static let menuBarMetric = SettingKey(name: "menuBarMetric", defaultValue: MenuBarMetric.off)
     /// The elapsed-window tick and on-pace verdict on each quota bar.
     static let showPaceOnBars = SettingKey(name: "showPaceOnBars", defaultValue: true)
+    /// When the popover lists the limit resets Anthropic has granted.
+    static let showLimitResets = SettingKey(name: "showLimitResets", defaultValue: ResetVisibility.always)
     /// Seconds between background polls. `UsageStore` falls back to the default
     /// for anything outside 120–900 (`PollInterval`).
     static let pollIntervalSeconds = SettingKey(name: "pollIntervalSeconds", defaultValue: 300)
@@ -35,6 +37,11 @@ nonisolated enum SettingsKeys {
     static let notifyForSession = SettingKey(name: "notifyForSession", defaultValue: true)
     static let notifyForWeekly = SettingKey(name: "notifyForWeekly", defaultValue: true)
     static let notifyForScopedWeekly = SettingKey(name: "notifyForScopedWeekly", defaultValue: true)
+    /// Limit reset alerts: a watched quota at 100% that a reset could clear, a reset
+    /// three days from expiring, and a newly granted reset.
+    static let notifyResetAtLimit = SettingKey(name: "notifyResetAtLimit", defaultValue: true)
+    static let notifyResetExpiring = SettingKey(name: "notifyResetExpiring", defaultValue: true)
+    static let notifyNewReset = SettingKey(name: "notifyNewReset", defaultValue: false)
 
     /// Bundle id of the browser for web links; empty means the system default.
     static let preferredBrowserBundleID = SettingKey(name: "preferredBrowserBundleID", defaultValue: "")
@@ -45,6 +52,8 @@ nonisolated enum SettingsKeys {
     static let serviceStatusHideWhenOperational = SettingKey(name: "serviceStatusHideWhenOperational", defaultValue: false)
     /// Developer tab: render the status row from a fabricated outage.
     static let simulateStatusOutage = SettingKey(name: "simulateStatusOutage", defaultValue: false)
+    /// Developer tab: add a fake weekly limit reset to the popover and the reset alerts.
+    static let simulateLimitReset = SettingKey(name: "simulateLimitReset", defaultValue: false)
 }
 
 extension UserDefaults {
