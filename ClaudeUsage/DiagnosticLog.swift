@@ -33,6 +33,7 @@ final class DiagnosticLog {
             case refresh = "Refresh"
             case status = "Status"
             case power = "Power"
+            case popover = "Popover"
         }
     }
 

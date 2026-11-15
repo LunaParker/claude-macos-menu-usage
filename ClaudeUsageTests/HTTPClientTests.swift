@@ -31,6 +31,22 @@ struct HTTPClientTests {
         #expect(URLCache.shared.cachedResponse(for: request) == nil)
     }
 
+    @Test("a request that names its own User-Agent keeps it; others get the app's")
+    func callerUserAgentWins() async throws {
+        let url = StubURLProtocol.uniqueURL()
+        StubURLProtocol.stub(url) { _ in .init(status: 200) }
+        let client = HTTPClient(session: URLSession(configuration: StubURLProtocol.configuration(base: HTTPClient.configuration())))
+        var named = URLRequest(url: url)
+        named.setValue("claude-cli/1.0.0 (external, cli)", forHTTPHeaderField: "User-Agent")
+
+        _ = try await client.send(named)
+        _ = try await client.send(URLRequest(url: url))
+
+        let agents = StubURLProtocol.requests(to: url).map { $0.value(forHTTPHeaderField: "User-Agent") }
+        #expect(agents.first == "claude-cli/1.0.0 (external, cli)")
+        #expect(agents.last??.hasPrefix("MenuBarUsageForClaude/") == true)
+    }
+
     @Test("the User-Agent carries the version it is given")
     func userAgentCarriesVersion() {
         #expect(HTTPClient.userAgent(version: "2.4").contains("/2.4 "))

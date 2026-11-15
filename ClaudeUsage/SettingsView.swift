@@ -46,6 +46,9 @@ private struct GeneralSettingsView: View {
     @AppStorage(SettingsKeys.showPaceOnBars)
     private var showPaceOnBars: Bool
 
+    @AppStorage(SettingsKeys.showLimitResets)
+    private var showLimitResets: ResetVisibility
+
     @AppStorage(SettingsKeys.preferredBrowserBundleID)
     private var preferredBrowserBundleID: String
 
@@ -99,6 +102,20 @@ private struct GeneralSettingsView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
+                Picker(selection: $showLimitResets) {
+                    ForEach(ResetVisibility.allCases, id: \.self) { visibility in
+                        Text(visibility.title).tag(visibility)
+                    }
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Show limit resets")
+                        Text(showLimitResets.caption)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .pickerStyle(.menu)
             } header: {
                 Text("Popover")
             }
@@ -203,6 +220,10 @@ private struct NotificationsSettingsView: View {
     @AppStorage(SettingsKeys.notifyForWeekly) private var notifyForWeekly: Bool
     @AppStorage(SettingsKeys.notifyForScopedWeekly) private var notifyForScopedWeekly: Bool
 
+    @AppStorage(SettingsKeys.notifyResetAtLimit) private var notifyResetAtLimit: Bool
+    @AppStorage(SettingsKeys.notifyResetExpiring) private var notifyResetExpiring: Bool
+    @AppStorage(SettingsKeys.notifyNewReset) private var notifyNewReset: Bool
+
     var body: some View {
         Form {
             if notifications.authorizationStatus != .authorized {
@@ -241,6 +262,23 @@ private struct NotificationsSettingsView: View {
                 )
             } header: {
                 Text("Quotas to Watch")
+            }
+
+            Section {
+                alertToggle(
+                    $notifyResetAtLimit,
+                    "Reset available at a limit",
+                    "Notify when a watched quota reaches 100% and one of your resets could clear it."
+                )
+                alertToggle($notifyResetExpiring, "Reset about to expire", "Notify three days before an unused reset expires.")
+                alertToggle($notifyNewReset, "New reset", "Notify when Anthropic gives you a new reset.")
+            } header: {
+                Text("Limit Resets")
+            } footer: {
+                Text("You use resets on claude.ai; this app only tells you about them. The expiry and new-reset alerts fire once per reset, and the at-limit alert once per window.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .formStyle(.grouped)
@@ -296,6 +334,9 @@ private struct DeveloperSettingsView: View {
 
     @AppStorage(SettingsKeys.simulateStatusOutage)
     private var simulateStatusOutage: Bool
+
+    @AppStorage(SettingsKeys.simulateLimitReset)
+    private var simulateLimitReset: Bool
 
     /// Pretty-printed when it parses, raw otherwise.
     private func copyLastResponse() {
@@ -439,6 +480,24 @@ private struct DeveloperSettingsView: View {
             }
 
             Section {
+                LabeledContent("Status") {
+                    limitResetsStatus
+                        .foregroundStyle(.secondary)
+                }
+                Toggle(isOn: $simulateLimitReset) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Simulate a weekly limit reset")
+                        Text("Adds a fake reset for the weekly limit to the popover and the reset notifications, as if Anthropic had granted one. Nothing is sent to Anthropic, and the fake reset can't be used.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            } header: {
+                Text("Limit Resets")
+            }
+
+            Section {
                 Button("Open Diagnostic Log") {
                     NSApp.activate(ignoringOtherApps: true)
                     openWindow(id: WindowIDs.diagnosticLog)
@@ -480,6 +539,18 @@ private struct DeveloperSettingsView: View {
     }
 
     // MARK: Derived labels
+
+    @ViewBuilder
+    private var limitResetsStatus: some View {
+        if let reason = usage.limitResetsUnavailableReason {
+            Text("Not offered (\(reason))")
+        } else if let resets = usage.limitResets, let checked = usage.limitResetsCheckedAt {
+            let held = resets.grants.reduce(0) { $0 + $1.count }
+            Text("\(held) held, checked \(checked, style: .relative) ago")
+        } else {
+            Text("Not checked yet")
+        }
+    }
 
     @ViewBuilder
     private var attemptLabel: some View {

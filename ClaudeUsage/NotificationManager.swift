@@ -135,10 +135,12 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, Usa
 
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private var alerts: UsageAlerts
+    @ObservationIgnored private var resetAlerts: ResetAlerts
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         alerts = UsageAlerts.load(from: defaults)
+        resetAlerts = ResetAlerts.load(from: defaults)
         super.init()
     }
 
@@ -201,6 +203,32 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate, Usa
                 body: message.body,
                 identifier: message.identifier,
                 categoryIdentifier: alert.event == .windowReset ? nil : Self.thresholdCategoryIdentifier
+            )
+        }
+    }
+
+    /// Called after each successful fetch once the resets have been checked.
+    /// Delivers the limit reset alerts that are due and saves their state.
+    func evaluateResets(snapshot: UsageSnapshot, resets: LimitResets) {
+        let now = Date()
+        let before = resetAlerts
+        let due = resetAlerts.evaluate(
+            resets: resets,
+            snapshot: snapshot,
+            preferences: ResetAlerts.Preferences(defaults: defaults),
+            canDeliver: canDeliver,
+            now: now
+        )
+        if resetAlerts != before {
+            resetAlerts.save(to: defaults)
+        }
+        for alert in due {
+            let message = alert.message(scopedTitle: snapshot.scopedWeekly?.title, now: now)
+            deliverNotification(
+                title: message.title,
+                body: message.body,
+                identifier: message.identifier,
+                categoryIdentifier: Self.thresholdCategoryIdentifier
             )
         }
     }
@@ -279,4 +307,5 @@ protocol UsageNotifying: AnyObject {
     func authenticationLost()
     func authenticationRestored()
     func evaluateThresholds(snapshot: UsageSnapshot)
+    func evaluateResets(snapshot: UsageSnapshot, resets: LimitResets)
 }

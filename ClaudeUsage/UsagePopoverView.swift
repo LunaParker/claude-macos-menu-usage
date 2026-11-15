@@ -103,6 +103,9 @@ private struct MainContentView: View {
     @Environment(StatusStore.self) private var status
     @Environment(\.openSettings) private var openSettings
 
+    @AppStorage(SettingsKeys.showLimitResets) private var resetVisibility: ResetVisibility
+    @AppStorage(SettingsKeys.simulateLimitReset) private var simulateLimitReset: Bool
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
@@ -199,13 +202,22 @@ private struct MainContentView: View {
     }
 
     private func loadedView(_ snapshot: UsageSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            if let session = snapshot.session {
-                QuotaBarView(bar: session)
+        let now = Date()
+        let resets = ResetsPresentation.make(
+            resets: LimitResets.displayed(usage.limitResets, simulate: simulateLimitReset, now: now),
+            snapshot: snapshot,
+            visibility: resetVisibility,
+            now: now
+        )
+        return VStack(alignment: .leading, spacing: 14) {
+            ForEach(snapshot.bars) { bar in
+                QuotaBarView(bar: bar)
+                if case .card(let card) = resets, card.bar == bar.id {
+                    LimitResetCard(card: card)
+                }
             }
-            QuotaBarView(bar: snapshot.weekly)
-            if let scoped = snapshot.scopedWeekly {
-                QuotaBarView(bar: scoped)
+            if case .row(let row) = resets {
+                LimitResetRow(row: row)
             }
             if let extra = snapshot.extraUsage {
                 ExtraUsageCard(summary: extra)
@@ -368,13 +380,38 @@ struct CapsuleBar: View {
     }
 }
 
-/// The MenuBarExtra panel is the only NSPanel the app owns. Closing it first
-/// keeps it from floating over the window being opened.
+/// Dismisses the popover before a link or window opens, so it doesn't float over it.
 enum MenuBarPanel {
     static func close() {
+        if let session = presentationSession() {
+            // macOS 27 presents the window through this session, which also owns the
+            // menu bar highlight: closing the window alone leaves the item highlighted.
+            session.perform(NSSelectorFromString("cancel"))
+            DiagnosticLog.shared.log(.popover, "Closed the popover by ending its status item session")
+            return
+        }
+        // The MenuBarExtra panel is the only NSPanel the app owns.
         for case let panel as NSPanel in NSApp.windows {
             panel.close()
         }
+        DiagnosticLog.shared.log(.popover, "Closed the popover window")
+    }
+
+    /// The status item's expanded interface session while the popover is shown (macOS 27+).
+    /// All SPI, so every step is checked with `responds(to:)` and nil on older systems.
+    private static func presentationSession() -> NSObject? {
+        let statusItem = NSSelectorFromString("statusItem")
+        let session = NSSelectorFromString("expandedInterfaceSession")
+        let cancel = NSSelectorFromString("cancel")
+        for window in NSApp.windows where window.className.contains("NSStatusBarWindow") && window.responds(to: statusItem) {
+            guard let item = window.perform(statusItem)?.takeUnretainedValue() as? NSStatusItem,
+                  item.responds(to: session),
+                  let active = item.perform(session)?.takeUnretainedValue() as? NSObject,
+                  active.responds(to: cancel)
+            else { continue }
+            return active
+        }
+        return nil
     }
 
     static func open(_ url: URL) {
