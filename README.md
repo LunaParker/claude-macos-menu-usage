@@ -31,7 +31,7 @@ If you're a Claude Pro, Max or Ultra subscriber and you use Claude Code, you pro
   - Live diagnostic counters, store state, token-refresh state, the Keychain read method, Copy Last Response (the raw usage JSON), Force Refresh, a test notification, a simulated outage and a factory reset
 - **Diagnostic log**: a window of timestamped Keychain, API, refresh, status and sleep/wake events, also written to `~/Library/Logs/ClaudeUsage/diagnostic.log` and the unified log (subsystem `com.shyowlstudios.ClaudeUsage`).
 - **First-run setup**: a Welcome page that explains what the app does before the first Keychain access, then a few optional questions with live previews: what the menu bar shows, which usage alerts you want, whether to show Claude's service status (and for which services), how often to refresh, and launch at login. Run it again any time from Settings.
-- **Live rate-limit countdown**: when the endpoint responds with HTTP 429, the popover shows a real-time "Retrying in 4m 23s" countdown, with a minimum 60-second cooldown floor to protect the endpoint even if the server returns `Retry-After: 0`.
+- **Live rate-limit countdown**: when the endpoint responds with HTTP 429, the popover shows a real-time "Retrying in 4m 23s" countdown, with a minimum 60-second cooldown floor to protect the endpoint even if the server returns `Retry-After: 0`. Before cooling down, the app re-reads the Keychain and retries once if Claude Code has just replaced its token.
 
 ## Authentication
 
