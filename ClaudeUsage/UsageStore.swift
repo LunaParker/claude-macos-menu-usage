@@ -115,9 +115,16 @@ final class UsageStore {
     /// A post-refresh check or manual retry that arrived mid-refresh runs once that ends.
     @ObservationIgnored private var rerunRequested = false
 
-    /// Reading credentials launches `security`, so they're cached until the
-    /// token expires or the API rejects it.
+    /// Reading credentials launches `security`, so they're cached until the token
+    /// is within `tokenRereadMargin` of expiry or the API rejects it.
     @ObservationIgnored private var cachedCredentials: ClaudeCredentials?
+
+    /// The last token read from the Keychain, so the log can say when it changed.
+    @ObservationIgnored private var lastTokenFingerprint: String?
+
+    /// Claude Code replaces its token 5 minutes before expiry, so inside this
+    /// margin every request re-reads the Keychain instead of trusting the cache.
+    private let tokenRereadMargin: TimeInterval = 10 * 60
 
     /// Popover opens and wakes within this long of a success show the existing snapshot.
     private let popoverDebounceInterval: TimeInterval = 60
@@ -273,14 +280,17 @@ final class UsageStore {
         let now = dependencies.now()
         if trigger == .popover || trigger == .wake,
            let lastUpdated, now.timeIntervalSince(lastUpdated) < popoverDebounceInterval {
+            DiagnosticLog.shared.log(.api, "Refresh skipped (\(trigger)): last success \(Int(now.timeIntervalSince(lastUpdated))) s ago")
             return
         }
         if let rateLimitedUntil, now < rateLimitedUntil {
+            let minutes = Int((rateLimitedUntil.timeIntervalSince(now) / 60).rounded(.up))
+            DiagnosticLog.shared.log(.api, "Refresh skipped (\(trigger)): rate limited for another \(minutes) min")
             return
         }
 
         isRefreshing = true
-        await performRefresh()
+        await performRefresh(trigger: trigger)
         isRefreshing = false
 
         if rerunRequested {
@@ -289,7 +299,7 @@ final class UsageStore {
         }
     }
 
-    private func performRefresh() async {
+    private func performRefresh(trigger: Trigger) async {
         let credentials: ClaudeCredentials
         do {
             credentials = try await loadCredentials()
@@ -310,28 +320,44 @@ final class UsageStore {
             return
         }
 
-        await fetchUsage(using: credentials, retryOnRotation: true)
+        await fetchUsage(using: credentials, reason: "\(trigger)", retryOnRotation: true)
     }
 
     private func loadCredentials() async throws -> ClaudeCredentials {
         if let cached = cachedCredentials, !cached.isExpired {
-            DiagnosticLog.shared.log(.keychain, "Using cached credentials")
-            return cached
+            let left = cached.expirationDate.timeIntervalSince(dependencies.now())
+            guard left <= tokenRereadMargin else {
+                DiagnosticLog.shared.log(.keychain, "Using cached credentials")
+                return cached
+            }
+            DiagnosticLog.shared.log(.keychain, "Token \(cached.fingerprint) expires within \(Int(tokenRereadMargin / 60)) min; re-reading the Keychain in case Claude Code replaced it")
+        } else {
+            DiagnosticLog.shared.log(.keychain, "Cache miss, loading from Keychain")
         }
-        DiagnosticLog.shared.log(.keychain, "Cache miss, loading from Keychain")
         let fresh = try await dependencies.credentials.load()
         cachedCredentials = fresh.credentials
         keychainReadMethod = fresh.method
+        let fingerprint = fresh.credentials.fingerprint
+        if let previous = lastTokenFingerprint, previous != fingerprint {
+            DiagnosticLog.shared.log(.keychain, "Keychain token changed: \(previous) → \(fingerprint)")
+        }
+        lastTokenFingerprint = fingerprint
         return fresh.credentials
     }
 
-    /// One request against the usage endpoint. A 401 on a cached token usually
-    /// means Claude Code rotated it, so with `retryOnRotation` the Keychain is
-    /// re-read and a newer token retried once, silently.
-    private func fetchUsage(using credentials: ClaudeCredentials, retryOnRotation: Bool) async {
+    /// Drops the cached token and reads the Keychain; nil when the read fails.
+    private func reloadCredentials() async -> ClaudeCredentials? {
+        cachedCredentials = nil
+        return try? await loadCredentials()
+    }
+
+    /// One request against the usage endpoint. With `retryOnRotation`, a 401 or 429
+    /// re-reads the Keychain and retries once, silently, if it holds a newer token.
+    private func fetchUsage(using credentials: ClaudeCredentials, reason: String, retryOnRotation: Bool) async {
         networkRequestCount += 1
         lastNetworkAttemptAt = dependencies.now()
-        DiagnosticLog.shared.log(.api, "Request #\(networkRequestCount) started")
+        let expiry = credentials.expirationDate.formatted(date: .omitted, time: .shortened)
+        DiagnosticLog.shared.log(.api, "Request #\(networkRequestCount) started (\(reason), token \(credentials.fingerprint), expires \(expiry))")
 
         do {
             let response = try await dependencies.fetcher.fetch(accessToken: credentials.accessToken)
@@ -341,17 +367,20 @@ final class UsageStore {
             await refreshResets(previous: previous, accessToken: credentials.accessToken)
         } catch UsageAPIError.rateLimited(let retryAfter) {
             let backoff = rateLimitPolicy.cooldown(retryAfter: retryAfter)
-            DiagnosticLog.shared.log(.api, "HTTP 429 — rate limited, backoff \(Int(backoff))s")
+            DiagnosticLog.shared.log(.api, "HTTP 429 on token \(credentials.fingerprint) — Retry-After \(retryAfter.map { "\(Int($0)) s" } ?? "missing")")
+            if retryOnRotation, let rotated = await rotatedAfterRejection(of: credentials) {
+                await fetchUsage(using: rotated, reason: "retry after 429", retryOnRotation: false)
+                return
+            }
+            DiagnosticLog.shared.log(.api, "Rate limited; cooling down for \(Int(backoff)) s")
             let until = dependencies.now().addingTimeInterval(backoff)
             rateLimitedUntil = until
             failure = .rateLimited(until: until)
         } catch UsageAPIError.unauthorized {
-            DiagnosticLog.shared.log(.api, "HTTP 401/403 — token rejected")
+            DiagnosticLog.shared.log(.api, "HTTP 401/403 — token \(credentials.fingerprint) rejected")
             cachedCredentials = nil
-            if retryOnRotation,
-               let rotated = Self.rotatedCredentials(replacing: credentials, reloaded: try? await loadCredentials()) {
-                DiagnosticLog.shared.log(.keychain, "Keychain holds a newer token — retrying silently")
-                await fetchUsage(using: rotated, retryOnRotation: false)
+            if retryOnRotation, let rotated = await rotatedAfterRejection(of: credentials) {
+                await fetchUsage(using: rotated, reason: "retry after 401", retryOnRotation: false)
                 return
             }
             handleUnusableToken()
@@ -455,6 +484,20 @@ final class UsageStore {
         retryWork = dependencies.scheduler.schedule(after: delay) { [weak self] in
             await self?.refresh(trigger: .retry)
         }
+    }
+
+    /// Re-reads the Keychain after a rejection and returns a newer token to retry with, if any.
+    private func rotatedAfterRejection(of rejected: ClaudeCredentials) async -> ClaudeCredentials? {
+        let reloaded = await reloadCredentials()
+        guard let rotated = Self.rotatedCredentials(replacing: rejected, reloaded: reloaded) else {
+            let found = reloaded.map {
+                $0.accessToken == rejected.accessToken ? "the same token \($0.fingerprint)" : "token \($0.fingerprint), already expired"
+            } ?? "nothing readable"
+            DiagnosticLog.shared.log(.keychain, "Keychain holds \(found); not retrying")
+            return nil
+        }
+        DiagnosticLog.shared.log(.keychain, "Keychain holds a newer token \(rotated.fingerprint) — retrying silently")
+        return rotated
     }
 
     /// Returns reloaded credentials when they carry a different, unexpired token;

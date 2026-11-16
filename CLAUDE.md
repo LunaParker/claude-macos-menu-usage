@@ -41,10 +41,12 @@ ClaudeUsage/
                                    App Shortcuts phrases
   UsagePace.swift                — A bar's elapsed window share and straight-line projection
   HTTPClient.swift               — Ephemeral session shared by both clients, RetryAfter,
-                                   RateLimitPolicy, LegacyURLCache cleanup
+                                   RateLimitPolicy, ResponseDiagnostics (error-response log line),
+                                   LegacyURLCache cleanup
   KeychainCredentials.swift      — ClaudeCredentials, CredentialSource/KeychainCredentialSource
                                    (off-main reads), KeychainCredentialStore (security CLI,
-                                   SecItemCopyMatching, ~/.claude/.credentials.json)
+                                   SecItemCopyMatching, ~/.claude/.credentials.json),
+                                   TokenFingerprint
   ClaudeCLI.swift                — ClaudeCLILocator, ClaudeCLIVersion, RefreshStrategy,
                                    ClaudeCLIRefresher (launch + timeout),
                                    CredentialRefreshing/ClaudeRefreshService
@@ -88,7 +90,8 @@ scripts/deploy.sh                — Release build, install to ~/Applications, r
 - **Plan-dependent choices:** `MenuBarMetric.resolved(for:)` turns a choice the snapshot has no bar for (the session on a verified Ultra account, the model limit on Pro) into `highest`, and never rewrites the stored value, so the choice comes back if the quota does (another account, an unverified Ultra account). `options(for:)` offers only the choices that resolve to themselves, all of them before data arrives. Settings (from the store's last snapshot, even a stale one) and setup (from the live one) bind their pickers through `Binding.resolved(for:)`, so the checked choice is the one the menu bar shows and never a missing tag. Don't detect plans by name: the Keychain still reports Ultra as `max` / `default_claude_max_20x`.
 - **Pace:** `UsagePace` takes a bar and the clock. The window starts 5 h (session) or 7 d (weekly, model-scoped) before `resetsAt`; the elapsed share is drawn as a tick on the bar, and the caption says "On pace" or when usage reaches 100% at a straight-line rate from the window's start. There is no verdict before 5% of the window has elapsed (the ratio is noise) or once the bar is full. Both re-render each minute with the reset countdown. `showPaceOnBars` (General → Popover, on by default) turns both off, leaving the bars as they were before.
 - **Display sleep:** the poll timer would otherwise fire in DarkWake, the brief maintenance wakes during sleep, where nobody sees the result and a launched `claude` freezes mid-refresh when the Mac sleeps again. `DisplaySleepMonitor` follows `screensDidSleep`/`screensDidWake`; five seconds after the displays wake the store fetches once (never before onboarding has finished).
-- A 401/403 on a cached token is treated as a possible token rotation first: the store re-reads the Keychain and silently retries once if it finds a different, unexpired token (Claude Code rotates the access token on every refresh and the old one is rejected immediately). Only if that fails does the background refresh start.
+- A 401/403 on a cached token is treated as a possible token rotation first: the store re-reads the Keychain and silently retries once if it finds a different, unexpired token (Claude Code rotates the access token on every refresh and the old one is rejected immediately). Only if that fails does the background refresh start. A 429 gets the same re-read and single retry before its cooldown starts (see Rate-limit handling).
+- The cached token is trusted only while it has more than 10 minutes left (`tokenRereadMargin`, on the store's clock); inside that window every request re-reads the Keychain first. Claude Code renews its token 5 minutes before expiry, so the first request after a renewal carries the new token instead of the revoked one.
 - Onboarding gates polling — Keychain access only happens after the user completes onboarding. The flag is one global key (`hasCompletedOnboarding`); `PreferenceMigrations` carries over the old bundle-path-scoped keys. Migrations run first in `App.init`, before `NotificationManager` loads the alert trackers.
 - **Setup window:** the welcome page's Continue is the consent step: it sets the flag and starts polling, then four optional pages follow (what the menu bar shows, usage alerts, service status, refresh interval and launch at login), each applying its choices as they're made, with live previews once data arrives. Back never returns to the welcome page. "Run Setup Again…" in Settings → General reopens the window at the first setup page (`SetupStep.first`); existing users aren't shown it otherwise. The pages map onto the existing keys through pure types: `AlertPreset` (offers "Custom" when the three threshold switches match no preset, so setup never silently changes them) and `ServiceStatusMode` (Never leaves the degraded-only switch alone).
 - **Poll interval:** a slider over `PollInterval.stops` (5, 10, 15 minutes) in both setup and Settings; it reschedules polling when it changes. The store honours any stored value from 300 to 900 seconds and falls back to 300 otherwise (an old 2–4 minute setting reads as 5 minutes; no migration). Five minutes is the floor: at 3 minutes plus popover opens (29–33 requests an hour, with Claude Code's own `/api/oauth/usage` calls on top) the endpoint sent four 429s in two days, the last with `Retry-After: 3600` (2026-10-11/12), and none in three days at ~4 an hour.
@@ -126,7 +129,7 @@ The resets claude.ai's Usage page lists ("Weekly reset", "Fable reset · 2") com
 - Also present and unused: `at_limit`, `exhausted`, `next_grant_id`, `weekly_resets_at`, `cooldown_until`, `event_props` (surface, tier, tenure), `paused_held`, and per grant `label`, `resets_total`, `type` (`session`/`weekly`/`full`), `gives_back_weekly` (Fable resets: true), `use_requires_limit`, `percent_used`, `blocking`, `arm`, `unavailable_reason`.
 - **Never call the claim endpoint** (`POST /api/organizations/{org}/reset_rate_limits`), in the app or while testing. Resets are used on claude.ai.
 
-**Rate-limit handling:** HTTP 429 responses set a cooldown (`rateLimitedUntil`) using the `Retry-After` header with a 60-second floor (`RateLimitPolicy`). The popover shows a live countdown during cooldown.
+**Rate-limit handling:** HTTP 429 responses set a cooldown (`rateLimitedUntil`) using the `Retry-After` header with a 60-second floor (`RateLimitPolicy`). The popover shows a live countdown during cooldown. Before the cooldown starts, the store re-reads the Keychain and, if it holds a different, unexpired token, retries once with it; a second 429 starts the cooldown from its own `Retry-After`. On 2026-11-15 and 11-16 both 429s (`Retry-After: 3600`) answered the app's first request after Claude Code renewed its token, sent with the revoked token while several Claude Code sessions were busy. The same request with Claude Code idle got a plain 401, and the new token answered 200 while the app was still cooling down.
 
 ## Keychain Credentials
 
@@ -190,6 +193,8 @@ OAuth credentials are stored by the `claude` CLI in the macOS login keychain:
 - the unified log (subsystem `com.shyowlstudios.ClaudeUsage`, one category per log category, messages public);
 - `~/Library/Logs/ClaudeUsage/diagnostic.log` (millisecond timestamps, trimmed to the newest 256 KB whenever it passes 512 KB);
 - the Diagnostic Log window's list (newest 500, kept in time order).
+
+Tokens are named by `TokenFingerprint` (the first 8 hex characters of the token's SHA-256), never written out. Each request line names its trigger, token and expiry; Keychain reads log the token, its expiry time and when it changed since the last read. Every non-200 response from either client logs one `ResponseDiagnostics` line: status, the allowlisted headers (`retry-after`, `request-id`, `x-should-retry`, `anthropic-ratelimit-*`) and the body's error type and message, capped at 200 characters. Refreshes skipped for the popover debounce or a 429 cooldown say so; skips while the displays sleep don't, since the Power entries already show it.
 
 To see app events next to the system's own: `/usr/bin/log show --predicate 'subsystem == "com.shyowlstudios.ClaudeUsage" OR process == "security"'` (zsh's `log` builtin shadows `/usr/bin/log`). A unit-test host logs to a scratch file instead.
 
