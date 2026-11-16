@@ -160,8 +160,12 @@ enum UsageAPIError: LocalizedError {
         }
     }
 
-    /// Maps a non-200 status to its error; both usage endpoint clients use it.
-    static func check(_ response: HTTPURLResponse) throws(UsageAPIError) {
+    /// Maps a non-200 status to its error and logs the response's details; both
+    /// usage endpoint clients use it.
+    static func check(_ response: HTTPURLResponse, body: Data, endpoint: String) throws(UsageAPIError) {
+        if response.statusCode != 200 {
+            DiagnosticLog.shared.log(.api, ResponseDiagnostics.summary(of: response, body: body, endpoint: endpoint))
+        }
         switch response.statusCode {
         case 200:
             return
@@ -218,7 +222,7 @@ final class UsageAPIClient: UsageFetching {
             }
         }
 
-        try UsageAPIError.check(response)
+        try UsageAPIError.check(response, body: data, endpoint: "usage")
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601WithFractionalSeconds

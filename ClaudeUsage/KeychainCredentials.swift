@@ -6,6 +6,7 @@
 //  login keychain under the service name "Claude Code-credentials".
 //
 
+import CryptoKit
 import Foundation
 import Security
 
@@ -158,14 +159,14 @@ nonisolated enum KeychainCredentialStore {
         }
     }
 
-    /// Logs the token's expiry status and returns it unchanged.
+    /// Logs which token was read and when it expires, and returns it unchanged.
     private static func logExpiry(_ creds: ClaudeCredentials) -> ClaudeCredentials {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .full
-        let relative = creds.isExpired
-            ? "expired \(formatter.localizedString(for: creds.expirationDate, relativeTo: Date()))"
-            : "expires \(formatter.localizedString(for: creds.expirationDate, relativeTo: Date()))"
-        DiagnosticLog.shared.log(.keychain, "Token \(relative)")
+        let relative = formatter.localizedString(for: creds.expirationDate, relativeTo: Date())
+        let time = creds.expirationDate.formatted(date: .omitted, time: .shortened)
+        let status = creds.isExpired ? "expired at \(time) (\(relative))" : "expires at \(time) (\(relative))"
+        DiagnosticLog.shared.log(.keychain, "Token \(creds.fingerprint) \(status)")
         return creds
     }
 
@@ -280,4 +281,16 @@ nonisolated enum KeychainCredentialStore {
             throw KeychainError.malformedPayload(error)
         }
     }
+}
+
+/// Names a token in the diagnostic log without revealing it.
+nonisolated enum TokenFingerprint {
+    /// The first 8 hex characters of the token's SHA-256.
+    static func of(_ token: String) -> String {
+        SHA256.hash(data: Data(token.utf8)).prefix(4).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+nonisolated extension ClaudeCredentials {
+    var fingerprint: String { TokenFingerprint.of(accessToken) }
 }

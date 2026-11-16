@@ -115,7 +115,7 @@ final class LimitResetsClient: LimitResetsFetching {
             case .notHTTP: throw UsageAPIError.http(-1)
             }
         }
-        try UsageAPIError.check(response)
+        try UsageAPIError.check(response, body: data, endpoint: "limit resets")
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601WithFractionalSeconds

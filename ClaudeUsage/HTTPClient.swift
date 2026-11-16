@@ -109,3 +109,57 @@ enum LegacyURLCache {
         remove(cachesDirectory: caches, bundleIdentifier: bundleIdentifier)
     }
 }
+
+/// One log line for an error response. Only allowlisted headers are named,
+/// and the body is reduced to its error, capped at `maxQuote` characters.
+nonisolated enum ResponseDiagnostics {
+    static let maxQuote = 200
+    private static let namedHeaders = ["retry-after", "request-id", "x-should-retry"]
+    private static let headerPrefix = "anthropic-ratelimit-"
+
+    static func summary(of response: HTTPURLResponse, body: Data, endpoint: String) -> String {
+        var line = "HTTP \(response.statusCode) from \(endpoint)"
+        let headers = headerPairs(response)
+        if !headers.isEmpty {
+            line += " — " + headers.map { "\($0.name) \($0.value)" }.joined(separator: ", ")
+        }
+        if let error = errorDescription(body) {
+            line += "; " + error
+        }
+        return line
+    }
+
+    private static func headerPairs(_ response: HTTPURLResponse) -> [(name: String, value: String)] {
+        var fields: [String: String] = [:]
+        for (key, value) in response.allHeaderFields {
+            guard let key = key as? String else { continue }
+            fields[key.lowercased()] = "\(value)"
+        }
+        let named = namedHeaders.compactMap { name in fields[name].map { (name: name, value: $0) } }
+        let rateLimit = fields.keys.filter { $0.hasPrefix(headerPrefix) }.sorted().map { (name: $0, value: fields[$0]!) }
+        return named + rateLimit
+    }
+
+    private struct Envelope: Decodable {
+        struct Detail: Decodable {
+            let type: String?
+            let message: String?
+        }
+        let error: Detail
+    }
+
+    private static func errorDescription(_ body: Data) -> String? {
+        if let envelope = try? JSONDecoder().decode(Envelope.self, from: body) {
+            let parts = [envelope.error.type, envelope.error.message.map(capped)].compactMap { $0 }
+            if !parts.isEmpty { return parts.joined(separator: ": ") }
+        }
+        let text = capped(String(decoding: body, as: UTF8.self))
+        return text.isEmpty ? nil : "body \"\(text)\""
+    }
+
+    /// Whitespace runs become single spaces, then anything past `maxQuote` ends in an ellipsis.
+    private static func capped(_ text: String) -> String {
+        let flat = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        return flat.count > maxQuote ? String(flat.prefix(maxQuote - 1)) + "…" : flat
+    }
+}
